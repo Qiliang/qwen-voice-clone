@@ -3,6 +3,7 @@ import base64
 import io
 import os
 import pathlib
+import secrets
 import shutil
 import threading
 import wave
@@ -13,12 +14,28 @@ from dashscope.audio.qwen_tts_realtime import (
     QwenTtsRealtime,
     QwenTtsRealtimeCallback,
 )
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, Response
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 app = FastAPI(title="Qwen Voice Clone")
+
+_basic_security = HTTPBasic()
+_BASIC_USER = os.getenv("BASIC_AUTH_USER", "hollycrm")
+_BASIC_PASS = os.getenv("BASIC_AUTH_PASS", "hollycrm")
+
+
+def _verify_basic(credentials: HTTPBasicCredentials = Depends(_basic_security)):
+    ok_user = secrets.compare_digest(credentials.username.encode(), _BASIC_USER.encode())
+    ok_pass = secrets.compare_digest(credentials.password.encode(), _BASIC_PASS.encode())
+    if not (ok_user and ok_pass):
+        raise HTTPException(
+            status_code=401,
+            detail="用户名或密码错误",
+            headers={"WWW-Authenticate": "Basic"},
+        )
 
 API_KEY = os.getenv("DASHSCOPE_API_KEY")
 CUSTOMIZATION_URL = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization"
@@ -132,7 +149,7 @@ def _run_tts_ws(text: str, voice: str, model: str, sample_rate: int, mode: str =
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-@app.get("/")
+@app.get("/", dependencies=[Depends(_verify_basic)])
 async def index():
     return FileResponse("static/qwen-voice-clone.html")
 
