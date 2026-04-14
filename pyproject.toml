@@ -9,4 +9,5 @@ dependencies = [
     "fastapi[standard]>=0.135.3",
     "numpy>=2.4.4",
     "requests>=2.33.1",
+    "soxr>=1.0.0",
 ]

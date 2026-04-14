@@ -2,11 +2,13 @@ import asyncio
 import base64
 import io
 import os
+import numpy as np
 import pathlib
 import secrets
 import shutil
 import threading
 import wave
+import soxr
 import requests
 import dashscope
 from dashscope.audio.qwen_tts_realtime import (
@@ -121,7 +123,7 @@ def _run_tts_ws(text: str, voice: str, model: str, sample_rate: int, mode: str =
         chunks = [l for l in text.split("\n") if l.strip()]
     else:  # char
         chunks = list(text)
-
+    print(chunks)
     if not chunks:
         raise ValueError("文本内容为空")
 
@@ -141,8 +143,20 @@ def _run_tts_ws(text: str, voice: str, model: str, sample_rate: int, mode: str =
         raise TimeoutError("TTS WebSocket 超时")
     if collector.error:
         raise RuntimeError(f"TTS 错误: {collector.error}")
-
-    pcm = _resample(collector.pcm_bytes(), _SAMPLE_RATE_SRC, sample_rate)
+    # 使用 soxr.resample 进行重采样
+    src_pcm = collector.pcm_bytes()
+    if _SAMPLE_RATE_SRC == sample_rate:
+        pcm = src_pcm
+    else:
+        src_np = np.frombuffer(src_pcm, dtype=np.int16)
+        if len(src_np) == 0:
+            pcm = b""
+        else:
+            # float32 for soxr, mono
+            src_audio = src_np.astype(np.float32) / 32768.0
+            resampled = soxr.resample(src_audio, _SAMPLE_RATE_SRC, sample_rate)
+            resampled_int16 = np.clip(resampled * 32768.0, -32768, 32767).astype(np.int16)
+            pcm = resampled_int16.tobytes()
     return _pcm_to_wav(pcm, sample_rate)
 
 
