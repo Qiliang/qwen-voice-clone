@@ -1,0 +1,151 @@
+在main.py,用fastapi中生成网页,
+网页文件：static/qwen-voice-clone.html
+
+布局：
+上下结构：
+    1. 左边是音色列表（50%比例），可以删除和播放。
+        - 其中列表的顶部有一段文本输入框（多行文本），点击音色列表“播放”按钮，就是播放这段文本。
+        - 有一个播放选项【”逐行输入“，”逐字输入“】。默认是逐行输入。逐行输入的意思是，先把整个整个文本传入后台，然后通过"\n"分割，逐行传入tts。逐字输入的意思是，先把整个整个文本传入后台，然后通过每个字符传入tts。
+        - 有播放sample_rate选项【8000，16000，24000】。默认是8000。
+    2. 右边上部分是上传音频（50%比例），
+        - 可以上传音频，或者选择历史上传过的音频。
+        - 然后显示音频能量波形，可以做音频的剪辑处理（左右各一个边界，可以调整边界，实现剪辑），有播放按钮，可以试听声音。
+        - 填写音色名称（只能是英文），点击“创建音色”按钮，增加一个音色，可以在音色列表中看到这个音色。
+  
+
+tts模型：[qwen3-tts-vc-realtime-2026-01-15, qwen3-tts-vc-realtime-2025-11-27]
+
+
+```markdown
+基于阿里云百炼平台（Model Studio）的千问声音复刻（Qwen-TTS Voice Cloning）文档，以下是关于**创建音色、查询音色列表、删除音色及语音合成**的API参考代码示例与参数描述：
+
+### 1. 创建音色 (Enrollment)
+声音复刻的第一步是上传音频进行注册。
+
+* **URL (北京):** `https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization`
+* **关键请求参数:**
+    * `model`: 固定为 `qwen-voice-enrollment`。
+    * `action`: 固定为 `create`。
+    * `target_model`: 目标语音合成模型（如 `qwen3-tts-vc-realtime-2026-01-15`）。
+    * `preferred_name`: 音色别名。
+    * `audio.data`: 音频的URL或Base64编码数据。
+
+**Python 示例代码：**
+```python
+import os
+import requests
+import base64, pathlib
+
+# 配置
+api_key = os.getenv("DASHSCOPE_API_KEY")
+url = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization"
+
+# 读取本地音频并转为Base64
+file_path = pathlib.Path("input.mp3")
+base64_str = base64.b64encode(file_path.read_bytes()).decode()
+data_uri = f"data:audio/mpeg;base64,{base64_str}"
+
+payload = {
+    "model": "qwen-voice-enrollment",
+    "input": {
+        "action": "create",
+        "target_model": "qwen3-tts-vc-realtime-2026-01-15",
+        "preferred_name": "my_custom_voice",
+        "audio": { "data": data_uri }
+    }
+}
+headers = { "Authorization": f"Bearer {api_key}", "Content-Type": "application/json" }
+
+resp = requests.post(url, json=payload, headers=headers)
+if resp.status_code == 200:
+    voice_id = resp.json()["output"]["voice"]
+    print(f"创建成功，音色ID (voice): {voice_id}")
+```
+
+---
+
+### 2. 查询音色列表 (List)
+用于获取已创建的所有音色及其对应的 `voice` 标识。
+
+* **关键请求参数:**
+    * `action`: 固定为 `list`。
+    * `page_index`: 分页索引（默认0）。
+    * `page_size`: 每页条数（默认10）。
+
+**cURL 示例代码：**
+```bash
+curl -X POST 'https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization' \
+--header 'Authorization: Bearer $DASHSCOPE_API_KEY' \
+--header 'Content-Type: application/json' \
+--data '{
+    "model": "qwen-voice-enrollment",
+    "input": {
+        "action": "list",
+        "page_size": 10,
+        "page_index": 0
+    }
+}'
+```
+
+---
+
+### 3. 删除音色 (Delete)
+如果不再需要某个复刻出的音色，可以将其删除。
+
+* **关键请求参数:**
+    * `action`: 固定为 `delete`。
+    * `voice`: 需要删除的音色ID（由创建接口返回）。
+
+**Python 示例代码：**
+```python
+payload = {
+    "model": "qwen-voice-enrollment",
+    "input": {
+        "action": "delete",
+        "voice": "your_voice_id_here"
+    }
+}
+resp = requests.post(url, json=payload, headers=headers)
+print(resp.json())
+```
+
+---
+
+### 4. 语音合成 (Speech Synthesis)
+复刻成功后，通过 `voice` 参数调用语音合成接口。
+
+* **URL (实时):** `https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization-realtime`
+* **关键请求参数:**
+    * `model`: 必须与创建音色时指定的 `target_model` 一致。
+    * `input.text`: 待合成的文本内容。
+    * `parameters.voice`: 使用复刻返回的音色ID。
+
+**Python 示例代码 (非流式):**
+```python
+# 注意：语音合成的URL和模型与复刻接口不同
+tts_url = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization" 
+tts_payload = {
+    "model": "qwen3-tts-vc-realtime-2026-01-15", # 使用之前复刻支持的模型
+    "input": {
+        "text": "你好，这是我复刻出来的声音。"
+    },
+    "parameters": {
+        "voice": "your_voice_id_here", # 填入复刻成功的voice ID
+        "format": "mp3"
+    }
+}
+
+response = requests.post(tts_url, json=tts_payload, headers=headers)
+if response.status_code == 200:
+    with open("output.mp3", "wb") as f:
+        f.write(response.content)
+    print("语音合成成功，保存为 output.mp3")
+```
+
+### 注意事项
+1.  **API Key 地域**: 北京地域和新加坡地域的 API Key 及 URL 不同。
+2.  **音频限制**: 建议复刻音频时长在 10~20 秒，格式支持 WAV, MP3, M4A。
+3.  **模型一致性**: 合成时使用的 `model` 必须与创建音色时的 `target_model` 严格匹配。
+```
+
+声音设计+tts播放的完整例子在vc.py中。

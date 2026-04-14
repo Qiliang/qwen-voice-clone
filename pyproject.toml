@@ -1,0 +1,13 @@
+[project]
+name = "voice-clone"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "dashscope>=1.25.16",
+    "fastapi[standard]>=0.135.3",
+    "numpy>=2.4.4",
+    "pyaudio>=0.2.14",
+    "requests>=2.33.1",
+]
