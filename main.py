@@ -117,7 +117,7 @@ def _pcm_to_wav(pcm: bytes, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
-def _run_tts_ws(text: str, voice: str, model: str, sample_rate: int, mode: str = "line") -> bytes:
+def _run_tts_ws(text: str, voice: str, model: str, sample_rate: int, mode: str = "line", speech_rate: float = 1.0, pitch_rate: float = 1.0) -> bytes:
     """同步执行 WebSocket TTS，在同一会话中逐行/逐字 append_text，返回 WAV 字节。"""
     if mode == "line":
         chunks = [l for l in text.split("\n") if l.strip()]
@@ -133,6 +133,8 @@ def _run_tts_ws(text: str, voice: str, model: str, sample_rate: int, mode: str =
     client.update_session(
         voice=voice,
         response_format=AudioFormat.PCM_24000HZ_MONO_16BIT,
+        speech_rate=speech_rate,
+        pitch_rate=pitch_rate,
         mode="server_commit",
     )
     for chunk in chunks:
@@ -222,6 +224,8 @@ class TTSRequest(BaseModel):
     sample_rate: int = 8000
     audio_format: str = "wav"
     mode: str = "line"  # "line"=逐行, "char"=逐字
+    speech_rate: float = 1.0
+    pitch_rate: float = 1.0
 
 
 @app.post("/api/tts")
@@ -229,7 +233,7 @@ async def tts(req: TTSRequest):
     try:
         loop = asyncio.get_event_loop()
         wav_data = await loop.run_in_executor(
-            None, _run_tts_ws, req.text, req.voice, req.model, req.sample_rate, req.mode
+            None, _run_tts_ws, req.text, req.voice, req.model, req.sample_rate, req.mode, req.speech_rate, req.pitch_rate
         )
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))

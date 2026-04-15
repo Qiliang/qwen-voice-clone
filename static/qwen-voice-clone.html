@@ -472,6 +472,20 @@
             <option value="24000">24000 Hz</option>
           </select>
         </div>
+        <div class="option-group">
+          <label>语速 <span id="speech-rate-value">1.0</span>x</label>
+          <input type="range" id="speech-rate" min="0.5" max="2.0" step="0.1" value="1.0"
+            oninput="document.getElementById('speech-rate-value').textContent = parseFloat(this.value).toFixed(1)"
+            style="width:100%; cursor:pointer;">
+          <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">1.0为正常语速，小于1.0为慢速，大于1.0为快速</div>
+        </div>
+        <div class="option-group">
+          <label>语调 <span id="pitch-rate-value">1.0</span>x</label>
+          <input type="range" id="pitch-rate" min="0.5" max="2.0" step="0.1" value="1.0"
+            oninput="document.getElementById('pitch-rate-value').textContent = parseFloat(this.value).toFixed(1)"
+            style="width:100%; cursor:pointer;">
+          <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">合成音频的语调，取值范围 [0.5, 2.0]，默认 1.0</div>
+        </div>
       </div>
 
       <div class="divider"></div>
@@ -673,6 +687,8 @@ async function toggleVoicePlay(voiceId, targetModel) {
   // 全文一次性发给后端，由后端在同一 WebSocket 会话中按 mode 拆分后逐步 append_text
   const mode = document.querySelector('input[name="play-mode"]:checked').value;
   const sampleRate = parseInt(document.getElementById('sample-rate').value);
+  const speechRate = parseFloat(document.getElementById('speech-rate').value);
+  const pitchRate = parseFloat(document.getElementById('pitch-rate').value);
 
   isPlayingTTS = true;
   currentPlayingVoiceId = voiceId;
@@ -685,7 +701,7 @@ async function toggleVoicePlay(voiceId, targetModel) {
   document.getElementById('tts-status').style.display = 'flex';
 
   try {
-    await playTTSRequest(text, voiceId, targetModel, sampleRate, mode, ttsAbortController.signal);
+    await playTTSRequest(text, voiceId, targetModel, sampleRate, mode, speechRate, pitchRate, ttsAbortController.signal);
   } catch (e) {
     if (e.name !== 'AbortError') toast(`TTS 播放失败: ${e.message}`, 'error');
   } finally {
@@ -710,12 +726,12 @@ function stopTTS() {
   document.getElementById('tts-status').style.display = 'none';
 }
 
-async function playTTSRequest(text, voice, model, sampleRate, mode, signal) {
+async function playTTSRequest(text, voice, model, sampleRate, mode, speechRate, pitchRate, signal) {
   // 全文 + mode 一次请求，后端在同一 WebSocket 会话内按 mode 拆分后逐步输入 TTS
   const resp = await fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voice, model, sample_rate: sampleRate, audio_format: 'wav', mode }),
+    body: JSON.stringify({ text, voice, model, sample_rate: sampleRate, audio_format: 'wav', mode, speech_rate: speechRate, pitch_rate: pitchRate }),
     signal,
   });
   if (!resp.ok) {
