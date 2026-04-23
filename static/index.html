@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>声音复刻平台</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f1f5f9;
+    color: #1e293b;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    background: linear-gradient(135deg, #1e293b, #334155);
+    color: #fff;
+    padding: 14px 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.2);
+  }
+
+  header h1 { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
+  header span { font-size: 13px; opacity: .6; }
+
+  .hero {
+    text-align: center;
+    padding: 64px 24px 32px;
+  }
+
+  .hero h2 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 10px;
+  }
+
+  .hero p {
+    font-size: 15px;
+    color: #64748b;
+  }
+
+  .cards {
+    display: flex;
+    justify-content: center;
+    gap: 32px;
+    padding: 40px 24px 80px;
+    flex-wrap: wrap;
+  }
+
+  .card {
+    background: #fff;
+    border-radius: 20px;
+    padding: 40px 36px;
+    width: 340px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.08);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    text-decoration: none;
+    color: inherit;
+    transition: transform .2s, box-shadow .2s;
+    border: 2px solid transparent;
+  }
+
+  .card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 12px 40px rgba(0,0,0,.14);
+  }
+
+  .card-icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    font-size: 32px;
+  }
+
+  .card-qwen .card-icon {
+    background: linear-gradient(135deg, #ede9fe, #ddd6fe);
+  }
+
+  .card-qwen:hover {
+    border-color: #7c3aed;
+  }
+
+  .card-cosy .card-icon {
+    background: linear-gradient(135deg, #cffafe, #a5f3fc);
+  }
+
+  .card-cosy:hover {
+    border-color: #0891b2;
+  }
+
+  .card h3 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .card-qwen h3 { color: #5b21b6; }
+  .card-cosy h3 { color: #0e7490; }
+
+  .card p {
+    font-size: 13px;
+    color: #64748b;
+    line-height: 1.6;
+    margin-bottom: 24px;
+  }
+
+  .card-btn {
+    display: inline-block;
+    padding: 10px 28px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    text-decoration: none;
+  }
+
+  .card-qwen .card-btn {
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  }
+
+  .card-cosy .card-btn {
+    background: linear-gradient(135deg, #0891b2, #0e7490);
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 6px;
+    margin-bottom: 14px;
+  }
+
+  .card-qwen .tag {
+    background: #ede9fe;
+    color: #6d28d9;
+  }
+
+  .card-cosy .tag {
+    background: #cffafe;
+    color: #0e7490;
+  }
+
+  footer {
+    margin-top: auto;
+    text-align: center;
+    padding: 20px;
+    font-size: 12px;
+    color: #94a3b8;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="114" height="25" viewBox="0 0 526 116">
+    <path d="M0 0 C61.38 0 122.76 0 186 0 C186 38.28 186 76.56 186 116 C124.62 116 63.24 116 0 116 C0 77.72 0 39.44 0 0 Z " fill="#FEFDFD" transform="translate(0,0)"/>
+    <path d="M0 0 C25.41 0 50.82 0 77 0 C77 38.28 77 76.56 77 116 C57.86 116 38.72 116 19 116 C21.25 109.25 21.25 109.25 22.9453125 106.1328125 C23.47705078 105.14667969 23.47705078 105.14667969 24.01953125 104.140625 C24.56673828 103.14289063 24.56673828 103.14289063 25.125 102.125 C25.68380859 101.09246094 25.68380859 101.09246094 26.25390625 100.0390625 C27.16499526 98.35705202 28.08190315 96.67819564 29 95 C28.39671875 94.81824219 27.7934375 94.63648437 27.171875 94.44921875 C19.23374341 91.95254833 19.23374341 91.95254833 16 89 C17.70926202 83.69964422 19.70193844 78.52231065 21.7890625 73.36132812 C24.0763084 67.45260955 24.81174104 62.53542427 26 56 C17.42 56 8.84 56 0 56 C-0.66 58.97 -1.32 61.94 -2 65 C-2.88555756 67.7338543 -3.93144343 70.32860857 -5 73 C-10.03779302 69.06515575 -14.97209729 64.72615472 -18 59 C-16.8158974 55.44769221 -15.70412814 54.75853234 -12.75 52.5625 C-11.98171875 51.98628906 -11.2134375 51.41007812 -10.421875 50.81640625 C-8.76518841 49.57389131 -7.10208972 48.33989245 -5.43359375 47.11328125 C-2.79250671 44.81981722 -1.15903622 42.58775699 0.6875 39.625 C1.26886719 38.70976563 1.85023437 37.79453125 2.44921875 36.8515625 C5.41753883 31.39344245 6.41458473 26.42529471 6.4375 20.25 C6.44064209 19.54987793 6.44378418 18.84975586 6.44702148 18.12841797 C6.30329577 11.85504341 4.43595256 7.24968489 1 2 C0.67 1.34 0.34 0.68 0 0 Z " fill="#E82B34" transform="translate(109,0)"/>
+    <path d="M0 0 C16.17 0 32.34 0 49 0 C49 38.28 49 76.56 49 116 C32.83 116 16.66 116 0 116 C0 77.72 0 39.44 0 0 Z " fill="#E82C35" transform="translate(0,0)"/>
+  </svg>
+  <h1>声音复刻平台</h1>
+  <span>阿里云百炼 · TTS Voice Cloning</span>
+</header>
+
+<div class="hero">
+  <h2>选择声音复刻引擎</h2>
+  <p>基于阿里云百炼大模型，支持多种 TTS 引擎进行声音克隆与合成</p>
+</div>
+
+<div class="cards">
+  <a href="/qwen" class="card card-qwen">
+    <div class="card-icon">🎙️</div>
+    <span class="tag">Qwen TTS</span>
+    <h3>Qwen 声音复刻</h3>
+    <p>基于通义千问 TTS 模型，支持实时流式语音合成，声音自然流畅，延迟极低。</p>
+    <span class="card-btn">进入 Qwen TTS →</span>
+  </a>
+
+  <a href="/cosyvoice" class="card card-cosy">
+    <div class="card-icon">🔊</div>
+    <span class="tag">CosyVoice</span>
+    <h3>CosyVoice 声音复刻</h3>
+    <p>基于 CosyVoice 模型，支持高质量声音注册与克隆，音色还原度高，表现力丰富。</p>
+    <span class="card-btn">进入 CosyVoice →</span>
+  </a>
+</div>
+
+<footer>阿里云百炼 · Voice Cloning Platform</footer>
+
+</body>
+</html>

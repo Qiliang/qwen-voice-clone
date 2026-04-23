@@ -264,6 +264,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", dependencies=[Depends(_verify_basic)])
 async def index():
+    return FileResponse("static/index.html")
+
+
+@app.get("/qwen", dependencies=[Depends(_verify_basic)])
+async def qwen_index():
     return FileResponse("static/qwen-voice-clone.html")
 
 
