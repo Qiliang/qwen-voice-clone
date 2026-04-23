@@ -1,0 +1,69 @@
+- 声音复刻的流程：
+1. 上传原始音频文件到系统中。
+2. 通过前端工具截断音频。
+3. 通过把截断音频上传到公网地址。通过rustfs.py。
+4. 通过参考cosyvoice-clone.py创建音色。
+
+参考cosyvoice-clone.html页面。
+布局：
+上下结构：
+    1. 左边是音色列表（50%比例），可以删除和播放。
+        - 其中列表的顶部有一段文本输入框（多行文本），点击音色列表“播放”按钮，就是播放这段文本。
+        - 有一个播放选项【”逐行输入“，”逐字输入“】。默认是逐行输入。逐行输入的意思是，先把整个整个文本传入后台，然后通过"\n"分割，逐行传入tts。逐字输入的意思是，先把整个整个文本传入后台，然后通过每个字符传入tts。
+        - 有播放sample_rate选项【8000，16000，24000】。默认是8000。
+    2. 右边上部分是上传音频（50%比例），
+        - 可以上传音频，或者选择历史上传过的音频。
+        - 然后显示音频能量波形，可以做音频的剪辑处理（左右各一个边界，可以调整边界，实现剪辑），有播放按钮，可以试听声音。
+        - 填写音色名称（只能是英文），点击“创建音色”按钮，增加一个音色，可以在音色列表中看到这个音色。
+  
+
+tts模型：[ cosyvoice-v3.5-plus、cosyvoice-v3.5-flash]
+
+- 分页查询已创建的音色列表。
+```text
+request:
+curl -X POST https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization \
+-H "Authorization: Bearer $DASHSCOPE_API_KEY" \
+-H "Content-Type: application/json" \
+{
+    "model": "voice-enrollment",
+    "input": {
+        "action": "list_voice",
+        "prefix": "announcer" //和创建音色时使用的prefix相同。仅允许数字和英文字母，不超过10个字符。
+        "page_size": 10, //每页包含数据条数。取值范围：[0, 1000]。
+        "page_index": 0  //页码索引，需大于或等于0。
+    }
+}
+response:
+{
+    "output": {
+        "voice_list": [
+            {
+                "gmt_create": "2024-12-11 13:38:02",
+                "voice_id": "yourVoiceId",
+                "gmt_modified": "2024-12-11 13:38:02",
+                "status": "OK"// DEPLOYING： 审核中;OK：审核通过，可调用;UNDEPLOYED：审核不通过，不可调用
+            }
+        ]
+    },
+    "usage": {
+        "count": 1
+    },
+    "request_id": "yourRequestId"
+}
+
+```
+
+- 删除音色
+```text
+curl -X POST https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization \
+-H "Authorization: Bearer $DASHSCOPE_API_KEY" \
+-H "Content-Type: application/json" \
+-d '{
+    "model": "voice-enrollment",
+    "input": {
+        "action": "delete_voice",
+        "voice_id": "yourVoiceID"
+    }
+}'
+```
