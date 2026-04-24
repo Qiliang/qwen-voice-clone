@@ -300,6 +300,7 @@ async def create_voice(req: CreateVoiceRequest):
             "target_model": req.target_model,
             "preferred_name": req.preferred_name,
             "audio": {"data": req.audio_data},
+
         },
     }
     resp = requests.post(CUSTOMIZATION_URL, json=payload,
@@ -415,6 +416,7 @@ class CosyCreateVoiceRequest(BaseModel):
     voice_name: str
     audio_data: str  # base64 data URI: "data:audio/wav;base64,..."
     target_model: str = "cosyvoice-v3.5-plus"
+    enable_preprocess: bool = True
 
 
 @app.post("/api/cosyvoice/voices")
@@ -452,6 +454,7 @@ async def cosyvoice_create_voice(req: CosyCreateVoiceRequest):
             prefix=req.voice_name,
             url=public_url,
             max_prompt_audio_length=30,
+            enable_preprocess=req.enable_preprocess,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建音色失败: {e}")
