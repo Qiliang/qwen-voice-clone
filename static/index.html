@@ -102,6 +102,14 @@
     border-color: #0891b2;
   }
 
+  .card-extract .card-icon {
+    background: linear-gradient(135deg, #d1fae5, #6ee7b7);
+  }
+
+  .card-extract:hover {
+    border-color: #0f766e;
+  }
+
   .card h3 {
     font-size: 18px;
     font-weight: 700;
@@ -110,6 +118,7 @@
 
   .card-qwen h3 { color: #5b21b6; }
   .card-cosy h3 { color: #0e7490; }
+  .card-extract h3 { color: #0f766e; }
 
   .card p {
     font-size: 13px;
@@ -136,6 +145,10 @@
     background: linear-gradient(135deg, #0891b2, #0e7490);
   }
 
+  .card-extract .card-btn {
+    background: linear-gradient(135deg, #0f766e, #0e7490);
+  }
+
   .tag {
     display: inline-block;
     font-size: 11px;
@@ -153,6 +166,11 @@
   .card-cosy .tag {
     background: #cffafe;
     color: #0e7490;
+  }
+
+  .card-extract .tag {
+    background: #d1fae5;
+    color: #0f766e;
   }
 
   footer {
@@ -196,6 +214,14 @@
     <h3>CosyVoice 声音复刻</h3>
     <p>基于 CosyVoice 模型，支持高质量声音注册与克隆，音色还原度高，表现力丰富。</p>
     <span class="card-btn">进入 CosyVoice →</span>
+  </a>
+
+  <a href="/extract" class="card card-extract">
+    <div class="card-icon">🎬</div>
+    <span class="tag">Audio Extract</span>
+    <h3>视频音频提取</h3>
+    <p>yt-dlp 按时间段下载，Demucs 人声分离、SpeechBrain 说话人分离、silero-vad 静音裁剪。</p>
+    <span class="card-btn">进入音频提取 →</span>
   </a>
 </div>
 

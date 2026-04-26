@@ -37,3 +37,9 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
+# voice-extract pipeline runtime artifacts
+extracts/
+cookies.txt
+pretrained_models/
+uploads/
+

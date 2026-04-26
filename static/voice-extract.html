@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>视频音频提取</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f1f5f9;
+      color: #1e293b;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: linear-gradient(135deg, #0f766e, #0e7490);
+      color: #fff;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(15, 118, 110, .35);
+      flex-shrink: 0;
+    }
+
+    header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+    header span { font-size: 13px; opacity: .75; }
+
+    header .nav-link {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 14px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.15);
+      color: #fff;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      transition: background .2s;
+    }
+    header .nav-link:hover { background: rgba(255,255,255,.28); }
+
+    main {
+      flex: 1;
+      max-width: 980px;
+      width: 100%;
+      margin: 24px auto;
+      padding: 0 20px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 20px 22px;
+      box-shadow: 0 2px 12px rgba(15, 23, 42, .06);
+    }
+
+    .card h2 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card h2::before {
+      content: "";
+      display: inline-block;
+      width: 4px; height: 16px;
+      background: linear-gradient(180deg, #0f766e, #0e7490);
+      border-radius: 2px;
+    }
+
+    label.field {
+      display: block;
+      margin-bottom: 14px;
+    }
+    label.field > .lbl {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #334155;
+      margin-bottom: 6px;
+    }
+    label.field .hint {
+      font-size: 12px;
+      color: #94a3b8;
+      font-weight: 400;
+      margin-left: 6px;
+    }
+
+    input[type="text"], input[type="number"], textarea, select {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      background: #fff;
+      color: #0f172a;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: #0e7490;
+      box-shadow: 0 0 0 3px rgba(14, 116, 144, .15);
+    }
+    textarea {
+      min-height: 120px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      resize: vertical;
+    }
+
+    .row {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .row > .field { flex: 1; min-width: 200px; margin-bottom: 0; }
+
+    .radio-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .radio-group label {
+      flex: 0 0 auto;
+      padding: 8px 16px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all .15s;
+      user-select: none;
+    }
+    .radio-group input[type="radio"] { display: none; }
+    .radio-group input[type="radio"]:checked + span {
+      color: #0e7490;
+      font-weight: 600;
+    }
+    .radio-group label:has(input:checked) {
+      border-color: #0e7490;
+      background: #ecfeff;
+    }
+
+    .step {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      background: #f8fafc;
+    }
+    .step-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .step-head input[type="checkbox"] {
+      width: 16px; height: 16px;
+      accent-color: #0e7490;
+      cursor: pointer;
+    }
+    .step-head .step-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .step-head .step-desc {
+      font-size: 12px;
+      color: #64748b;
+      margin-left: auto;
+    }
+    .step-body {
+      display: none;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed #e2e8f0;
+    }
+    .step.active .step-body { display: block; }
+    .step.active { background: #ecfeff; border-color: #67e8f9; }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
+
+    button {
+      font-family: inherit;
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      transition: transform .1s, box-shadow .15s, opacity .15s;
+    }
+    button.primary {
+      background: linear-gradient(135deg, #0891b2, #0e7490);
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(14, 116, 144, .35);
+    }
+    button.primary:hover:not(:disabled) { transform: translateY(-1px); }
+    button.primary:disabled { opacity: .55; cursor: not-allowed; }
+    button.ghost {
+      background: #f1f5f9;
+      color: #475569;
+    }
+    button.ghost:hover { background: #e2e8f0; }
+
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .9s linear infinite;
+      vertical-align: -2px;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .status-banner {
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      display: none;
+    }
+    .status-banner.show { display: block; }
+    .status-banner.info { background: #eff6ff; color: #1e40af; border-left: 4px solid #3b82f6; }
+    .status-banner.error { background: #fef2f2; color: #991b1b; border-left: 4px solid #ef4444; }
+    .status-banner.success { background: #ecfdf5; color: #065f46; border-left: 4px solid #10b981; }
+
+    .results { display: none; }
+    .results.show { display: block; }
+
+    .result-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      background: #f8fafc;
+    }
+    .result-item:last-child { margin-bottom: 0; }
+    .result-item .kind-tag {
+      flex: 0 0 auto;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+    .kind-tag.original { background: #fef3c7; color: #92400e; }
+    .kind-tag.vocals   { background: #dbeafe; color: #1e40af; }
+    .kind-tag.speaker  { background: #ede9fe; color: #5b21b6; }
+    .kind-tag.trimmed  { background: #d1fae5; color: #065f46; }
+
+    .result-item .filename {
+      flex: 0 0 auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      color: #334155;
+      min-width: 140px;
+    }
+    .result-item .filesize {
+      font-size: 11px;
+      color: #94a3b8;
+      flex: 0 0 auto;
+    }
+    .result-item audio {
+      flex: 1;
+      min-width: 200px;
+      height: 36px;
+    }
+    .result-item a.dl {
+      flex: 0 0 auto;
+      padding: 7px 14px;
+      background: #0e7490;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .result-item a.dl:hover { background: #155e75; }
+
+    .footer-note {
+      text-align: center;
+      font-size: 12px;
+      color: #94a3b8;
+      padding: 10px 0 4px;
+    }
+
+    .pill-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .pill-row button {
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 500;
+      background: #e2e8f0;
+      color: #334155;
+    }
+    .pill-row button:hover { background: #cbd5e1; }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>视频音频提取</h1>
+    <span>yt-dlp · Demucs · SpeechBrain · silero-vad</span>
+    <a href="/" class="nav-link">← 返回首页</a>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>1. 下载来源</h2>
+      <label class="field">
+        <span class="lbl">视频 URL</span>
+        <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=...  或  https://www.bilibili.com/video/..." autocomplete="off">
+      </label>
+      <div class="row" style="margin-bottom: 14px;">
+        <label class="field">
+          <span class="lbl">时间段 <span class="hint">HH:MM:SS-HH:MM:SS</span></span>
+          <input type="text" id="time_range" placeholder="00:00:10-00:01:30" autocomplete="off" value="00:00:00-00:01:00">
+        </label>
+        <label class="field">
+          <span class="lbl">输出格式</span>
+          <div class="radio-group">
+            <label><input type="radio" name="audio_format" value="wav" checked><span>WAV</span></label>
+            <label><input type="radio" name="audio_format" value="mp3"><span>MP3</span></label>
+            <label><input type="radio" name="audio_format" value="m4a"><span>M4A</span></label>
+          </div>
+        </label>
+      </div>
+      <label class="field" style="margin-bottom: 4px;">
+        <span class="lbl">Cookies <span class="hint">Netscape 格式，可留空</span></span>
+        <div class="pill-row">
+          <button type="button" id="btn-load-cookies">加载服务器默认</button>
+          <button type="button" id="btn-clear-cookies">清空</button>
+        </div>
+        <textarea id="cookies" placeholder="# Netscape HTTP Cookie File&#10;.example.com&#9;TRUE&#9;/&#9;FALSE&#9;0&#9;name&#9;value"></textarea>
+      </label>
+      <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: #475569; cursor: pointer;">
+        <input type="checkbox" id="save_cookies" style="accent-color: #0e7490;">
+        提交时把当前 cookies 保存为服务器默认
+      </label>
+    </div>
+
+    <div class="card">
+      <h2>2. 可选处理步骤</h2>
+
+      <div class="step" id="step-vocal">
+        <label class="step-head">
+          <input type="checkbox" id="do_vocal">
+          <span class="step-title">提取人声</span>
+          <span class="step-desc">Demucs htdemucs · 仅保留 vocals 分轨</span>
+        </label>
+      </div>
+
+      <div class="step" id="step-diarize">
+        <label class="step-head">
+          <input type="checkbox" id="do_diarize">
+          <span class="step-title">说话人分离</span>
+          <span class="step-desc">SpeechBrain ECAPA-TDNN + 层次聚类</span>
+        </label>
+        <div class="step-body">
+          <label class="field" style="margin-bottom: 0; max-width: 260px;">
+            <span class="lbl">说话人数量 <span class="hint">留空=自动估计</span></span>
+            <input type="number" id="diarize_num_speakers" min="1" max="20" placeholder="自动">
+          </label>
+        </div>
+      </div>
+
+      <div class="step" id="step-vad">
+        <label class="step-head">
+          <input type="checkbox" id="do_vad">
+          <span class="step-title">静音裁剪</span>
+          <span class="step-desc">silero-vad · 保留语音段并向两侧扩展 overlap</span>
+        </label>
+        <div class="step-body">
+          <label class="field" style="margin-bottom: 0; max-width: 260px;">
+            <span class="lbl">Overlap (ms) <span class="hint">默认 200</span></span>
+            <input type="number" id="vad_overlap_ms" min="0" max="2000" value="200">
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="status-banner" id="status"></div>
+
+    <div class="actions">
+      <button class="primary" id="submit-btn">开始处理</button>
+    </div>
+
+    <div class="card results" id="results">
+      <h2>处理结果</h2>
+      <div id="result-list"></div>
+    </div>
+
+    <div class="footer-note">
+      处理时间随时长与开启步骤增加，全流程可能 1-3 分钟，请勿关闭页面。
+    </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(text, type = "info") {
+      const banner = $("status");
+      banner.className = `status-banner show ${type}`;
+      banner.textContent = text;
+    }
+    function clearStatus() {
+      $("status").className = "status-banner";
+    }
+
+    function syncStepActive() {
+      for (const id of ["vocal", "diarize", "vad"]) {
+        const cb = $(`do_${id}`);
+        const step = $(`step-${id}`);
+        step.classList.toggle("active", cb.checked);
+      }
+    }
+    document.querySelectorAll(".step input[type=checkbox]").forEach(cb => {
+      cb.addEventListener("change", syncStepActive);
+    });
+    syncStepActive();
+
+    $("btn-load-cookies").addEventListener("click", async () => {
+      try {
+        const r = await fetch("/api/extract/cookies");
+        if (!r.ok) throw new Error(r.statusText);
+        const data = await r.json();
+        $("cookies").value = data.cookies || "";
+        setStatus(data.cookies ? "已载入服务器保存的 cookies。" : "服务器尚无保存的 cookies。", "info");
+      } catch (e) {
+        setStatus(`加载 cookies 失败: ${e.message}`, "error");
+      }
+    });
+
+    $("btn-clear-cookies").addEventListener("click", () => {
+      $("cookies").value = "";
+      clearStatus();
+    });
+
+    function fmtSize(bytes) {
+      if (!bytes) return "";
+      const u = ["B", "KB", "MB", "GB"];
+      let i = 0, n = bytes;
+      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+      return `${n.toFixed(1)} ${u[i]}`;
+    }
+
+    function renderResults(data) {
+      const list = $("result-list");
+      list.innerHTML = "";
+      for (const f of data.files) {
+        const row = document.createElement("div");
+        row.className = "result-item";
+
+        const tag = document.createElement("span");
+        tag.className = `kind-tag ${f.kind}`;
+        tag.textContent = f.kind;
+        row.appendChild(tag);
+
+        const name = document.createElement("span");
+        name.className = "filename";
+        name.textContent = f.name;
+        row.appendChild(name);
+
+        const size = document.createElement("span");
+        size.className = "filesize";
+        size.textContent = fmtSize(f.size);
+        row.appendChild(size);
+
+        const audio = document.createElement("audio");
+        audio.controls = true;
+        audio.preload = "none";
+        audio.src = f.url;
+        row.appendChild(audio);
+
+        const dl = document.createElement("a");
+        dl.className = "dl";
+        dl.href = f.url;
+        dl.download = f.name;
+        dl.textContent = "下载";
+        row.appendChild(dl);
+
+        list.appendChild(row);
+      }
+      $("results").classList.add("show");
+    }
+
+    $("submit-btn").addEventListener("click", async () => {
+      const url = $("url").value.trim();
+      const time_range = $("time_range").value.trim();
+      if (!url) { setStatus("请填写视频 URL", "error"); return; }
+      if (!/^\*?\d{1,2}:\d{2}:\d{2}-\d{1,2}:\d{2}:\d{2}$/.test(time_range)) {
+        setStatus("时间段格式错误，期望 HH:MM:SS-HH:MM:SS", "error");
+        return;
+      }
+
+      const audio_format = document.querySelector("input[name=audio_format]:checked").value;
+      const cookies = $("cookies").value;
+      const save_cookies = $("save_cookies").checked;
+      const do_vocal = $("do_vocal").checked;
+      const do_diarize = $("do_diarize").checked;
+      const do_vad = $("do_vad").checked;
+      const num_raw = $("diarize_num_speakers").value.trim();
+      const diarize_num_speakers = num_raw === "" ? null : parseInt(num_raw, 10);
+      const vad_overlap_ms = parseInt($("vad_overlap_ms").value || "200", 10);
+
+      const body = {
+        url, time_range, audio_format,
+        cookies, save_cookies,
+        do_vocal, do_diarize, diarize_num_speakers,
+        do_vad, vad_overlap_ms,
+      };
+
+      const btn = $("submit-btn");
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>处理中…';
+      setStatus("正在下载并处理音频，长流程可能需要数分钟，请耐心等待…", "info");
+      $("results").classList.remove("show");
+
+      try {
+        const r = await fetch("/api/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          throw new Error(data.detail || r.statusText);
+        }
+        setStatus(`处理完成 · 任务 ${data.task_id} · 共 ${data.files.length} 个文件`, "success");
+        renderResults(data);
+      } catch (e) {
+        setStatus(`处理失败: ${e.message}`, "error");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "开始处理";
+      }
+    });
+  </script>
+</body>
+</html>

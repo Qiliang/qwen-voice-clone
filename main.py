@@ -33,6 +33,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from rustfs import upload_file as rustfs_upload
+import voice_extract
 
 app = FastAPI(title="Qwen Voice Clone")
 
@@ -542,3 +543,72 @@ async def cosyvoice_tts(req: CosyTTSRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"TTS 合成失败: {e}")
     return Response(content=wav_data, media_type="audio/wav")
+
+
+# ===== 视频音频提取 Routes =====
+
+@app.get("/extract", dependencies=[Depends(_verify_basic)])
+async def extract_index():
+    return FileResponse("static/voice-extract.html")
+
+
+@app.get("/api/extract/cookies")
+async def extract_get_cookies():
+    return {"cookies": voice_extract.get_default_cookies()}
+
+
+class ExtractCookiesRequest(BaseModel):
+    cookies: str
+
+
+@app.post("/api/extract/cookies")
+async def extract_save_cookies(req: ExtractCookiesRequest):
+    voice_extract.save_default_cookies(req.cookies)
+    return {"ok": True}
+
+
+class ExtractRequest(BaseModel):
+    url: str
+    time_range: str
+    audio_format: str = "wav"  # mp3 | wav | m4a
+    cookies: str | None = None
+    save_cookies: bool = False
+    do_vocal: bool = False
+    do_diarize: bool = False
+    diarize_num_speakers: int | None = None
+    do_vad: bool = False
+    vad_overlap_ms: int = 200
+
+
+@app.post("/api/extract", dependencies=[Depends(_verify_basic)])
+async def extract_run(req: ExtractRequest):
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            voice_extract.run_pipeline,
+            req.url,
+            req.time_range,
+            req.audio_format,
+            req.cookies,
+            req.save_cookies,
+            req.do_vocal,
+            req.do_diarize,
+            req.diarize_num_speakers,
+            req.do_vad,
+            req.vad_overlap_ms,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"音频提取失败: {e}")
+    return result
+
+
+@app.get("/api/extract/files/{task_id}/{filename}")
+async def extract_get_file(task_id: str, filename: str):
+    try:
+        path = voice_extract.get_extract_file(task_id, filename)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return FileResponse(str(path), filename=filename)
