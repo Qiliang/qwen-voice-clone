@@ -27,6 +27,9 @@ dependencies = [
 torch = [
     { index = "pytorch-cpu" },
 ]
+torchaudio = [
+    { index = "pytorch-cpu" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
