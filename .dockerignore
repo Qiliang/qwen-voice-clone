@@ -1,0 +1,33 @@
+# Git / VCS
+.git
+.gitignore
+.github
+
+# Python 缓存与构建产物
+__pycache__
+*.py[cod]
+*.egg-info
+build
+dist
+wheels
+
+# 本地虚拟环境（Windows 路径，Linux 容器无法使用，必须排除）
+.venv
+
+# 运行时产物（不应进入镜像）
+extracts
+uploads
+cookies.txt
+
+# IDE / 编辑器
+.vscode
+.idea
+.cursor
+
+# macOS / Windows 杂项
+.DS_Store
+Thumbs.db
+
+# 文档与本地脚本
+README.md
+todo
