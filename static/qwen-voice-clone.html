@@ -218,6 +218,9 @@
     gap: 6px;
     flex-shrink: 0;
     margin-left: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 280px;
   }
 
   .btn {
@@ -611,6 +614,9 @@ let currentAudioFile = null;  // File or {url, name}
 let isPlayingTTS = false;
 let ttsAbortController = null;
 let currentPlayingVoiceId = null;
+let currentTTSAudio = null;
+/** @type {Record<string, {blob: Blob, url: string}>} */
+let ttsAudioCache = {};
 
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', () => {
@@ -666,6 +672,7 @@ function renderVoiceList() {
     const model = v.target_model || 'qwen3-tts-vc-realtime-2026-01-15';
     const safeId = escHtml(v.voice);
     const safeModel = escHtml(model);
+    const hasCache = !!ttsAudioCache[v.voice];
     return `
     <div class="voice-item" id="voice-${safeId}">
       <div class="voice-info">
@@ -678,6 +685,12 @@ function renderVoiceList() {
           onclick="toggleVoicePlay('${safeId}', '${safeModel}')">
           ▶ 播放
         </button>
+        ${hasCache ? `
+        <button class="btn btn-ghost btn-sm" id="replay-btn-${safeId}"
+          onclick="replayVoiceAudio('${safeId}')">↻ 再次播放</button>
+        <button class="btn btn-ghost btn-sm" id="download-btn-${safeId}"
+          onclick="downloadVoiceAudio('${safeId}')">⬇ 下载</button>
+        ` : ''}
         <button class="btn btn-danger btn-sm" onclick="deleteVoice('${safeId}')">✕</button>
       </div>
     </div>`;
@@ -689,6 +702,105 @@ function escHtml(s) {
 }
 
 // ===== TTS Playback =====
+function setVoiceAudioCache(voiceId, blob) {
+  const prev = ttsAudioCache[voiceId];
+  if (prev?.url) URL.revokeObjectURL(prev.url);
+  ttsAudioCache[voiceId] = { blob, url: URL.createObjectURL(blob) };
+  showVoiceAudioActions(voiceId);
+}
+
+function showVoiceAudioActions(voiceId) {
+  const item = document.getElementById(`voice-${voiceId}`);
+  const actions = item?.querySelector('.voice-actions');
+  if (!actions) return;
+  if (!document.getElementById(`replay-btn-${voiceId}`)) {
+    const playBtn = document.getElementById(`play-btn-${voiceId}`);
+    const replay = document.createElement('button');
+    replay.className = 'btn btn-ghost btn-sm';
+    replay.id = `replay-btn-${voiceId}`;
+    replay.textContent = '↻ 再次播放';
+    replay.onclick = () => replayVoiceAudio(voiceId);
+    const download = document.createElement('button');
+    download.className = 'btn btn-ghost btn-sm';
+    download.id = `download-btn-${voiceId}`;
+    download.textContent = '⬇ 下载';
+    download.onclick = () => downloadVoiceAudio(voiceId);
+    if (playBtn && playBtn.nextSibling) {
+      actions.insertBefore(download, playBtn.nextSibling);
+      actions.insertBefore(replay, playBtn.nextSibling);
+    } else {
+      actions.appendChild(replay);
+      actions.appendChild(download);
+    }
+  }
+}
+
+function playCachedAudio(voiceId, signal) {
+  const cached = ttsAudioCache[voiceId];
+  if (!cached) return Promise.reject(new Error('没有可播放的音频'));
+  return new Promise((resolve, reject) => {
+    const audio = new Audio(cached.url);
+    currentTTSAudio = audio;
+    const cleanup = () => { if (currentTTSAudio === audio) currentTTSAudio = null; };
+    audio.onended = () => { cleanup(); resolve(); };
+    audio.onerror = () => { cleanup(); reject(new Error('播放失败')); };
+    audio.play().catch((e) => { cleanup(); reject(e); });
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        audio.pause();
+        cleanup();
+        resolve();
+      }, { once: true });
+    }
+  });
+}
+
+async function replayVoiceAudio(voiceId) {
+  if (isPlayingTTS) {
+    stopTTS();
+    return;
+  }
+  if (!ttsAudioCache[voiceId]) {
+    toast('没有可再次播放的音频', 'error');
+    return;
+  }
+
+  isPlayingTTS = true;
+  currentPlayingVoiceId = voiceId;
+  ttsAbortController = new AbortController();
+
+  const btn = document.getElementById(`play-btn-${voiceId}`);
+  const item = document.getElementById(`voice-${voiceId}`);
+  if (btn) btn.textContent = '⬛ 停止';
+  if (item) item.classList.add('playing');
+
+  try {
+    await playCachedAudio(voiceId, ttsAbortController.signal);
+  } catch (e) {
+    if (e.name !== 'AbortError') toast(`播放失败: ${e.message}`, 'error');
+  } finally {
+    isPlayingTTS = false;
+    currentPlayingVoiceId = null;
+    if (btn) btn.textContent = '▶ 播放';
+    if (item) item.classList.remove('playing');
+  }
+}
+
+function downloadVoiceAudio(voiceId) {
+  const cached = ttsAudioCache[voiceId];
+  if (!cached) {
+    toast('没有可下载的音频', 'error');
+    return;
+  }
+  const name = extractVoiceName(voiceId) || voiceId;
+  const a = document.createElement('a');
+  a.href = cached.url;
+  a.download = `${name}_${Date.now()}.wav`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 async function toggleVoicePlay(voiceId, targetModel) {
   if (isPlayingTTS) {
     stopTTS();
@@ -732,6 +844,10 @@ async function toggleVoicePlay(voiceId, targetModel) {
 
 function stopTTS() {
   isPlayingTTS = false;
+  if (currentTTSAudio) {
+    currentTTSAudio.pause();
+    currentTTSAudio = null;
+  }
   if (ttsAbortController) ttsAbortController.abort();
   const voiceId = currentPlayingVoiceId;
   if (voiceId) {
@@ -756,14 +872,8 @@ async function playTTSRequest(text, voice, model, sampleRate, mode, speechRate, 
     throw new Error(err.detail || resp.statusText);
   }
   const blob = await resp.blob();
-  const url = URL.createObjectURL(blob);
-  return new Promise((resolve, reject) => {
-    const audio = new Audio(url);
-    audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-    audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('播放失败')); };
-    audio.play().catch(reject);
-    signal.addEventListener('abort', () => { audio.pause(); URL.revokeObjectURL(url); resolve(); });
-  });
+  setVoiceAudioCache(voice, blob);
+  return playCachedAudio(voice, signal);
 }
 
 // ===== Delete Voice =====
