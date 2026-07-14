@@ -545,6 +545,203 @@ async def cosyvoice_tts(req: CosyTTSRequest):
     return Response(content=wav_data, media_type="audio/wav")
 
 
+# ===== MiniMax Routes =====
+
+MINIMAX_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+MINIMAX_REGISTRY_FILE = pathlib.Path("uploads/minimax_demo_registry.json")
+
+
+def _load_minimax_registry() -> list:
+    if MINIMAX_REGISTRY_FILE.exists():
+        try:
+            return json.loads(MINIMAX_REGISTRY_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+    return []
+
+
+def _save_minimax_registry(registry: list) -> None:
+    MINIMAX_REGISTRY_FILE.write_text(
+        json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def get_minimax_headers():
+    return {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+
+
+@app.get("/minimax", dependencies=[Depends(_verify_basic)])
+async def minimax_index():
+    return FileResponse("static/minimax-voice-clone.html")
+
+
+class MiniMaxCloneRequest(BaseModel):
+    voice_id: str
+    text: str
+    audio_data: str  # base64 data URI: "data:audio/wav;base64,..."
+    model: str = "MiniMax/speech-2.8-turbo"
+    language_boost: str | None = None
+    need_noise_reduction: bool = False
+    need_volume_normalization: bool = False
+
+
+@app.post("/api/minimax/clone")
+async def minimax_clone(req: MiniMaxCloneRequest):
+    # voice_id: [8,256], first letter, alnum/-/_, last not -/_
+    if not re.match(r"^[A-Za-z][A-Za-z0-9_-]{6,254}[A-Za-z0-9]$", req.voice_id):
+        raise HTTPException(
+            status_code=400,
+            detail="voice_id 需 8~256 位：首字母、末位非 -/_，仅字母数字-_",
+        )
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="试听文本不能为空")
+    if len(text) > 1000:
+        raise HTTPException(status_code=400, detail="试听文本不能超过 1000 字符")
+
+    allowed_models = {
+        "MiniMax/speech-2.8-hd",
+        "MiniMax/speech-02-hd",
+        "MiniMax/speech-2.8-turbo",
+        "MiniMax/speech-02-turbo",
+    }
+    if req.model not in allowed_models:
+        raise HTTPException(status_code=400, detail=f"不支持的模型: {req.model}")
+
+    try:
+        header, b64 = req.audio_data.split(",", 1)
+        audio_bytes = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="音频数据格式错误")
+
+    if len(audio_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="音频文件不能超过 20MB")
+
+    tmp_filename = f"minimax_{req.voice_id}_{int(time.time())}.wav"
+    tmp_path = UPLOAD_DIR / tmp_filename
+    tmp_path.write_bytes(audio_bytes)
+
+    try:
+        public_url = rustfs_upload(str(tmp_path))
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"上传到公网失败: {e}")
+
+    input_payload: dict = {
+        "action": "voice_clone",
+        "voice_id": req.voice_id,
+        "audio_url": public_url,
+        "text": text,
+        "need_noise_reduction": req.need_noise_reduction,
+        "need_volume_normalization": req.need_volume_normalization,
+    }
+    if req.language_boost:
+        input_payload["language_boost"] = req.language_boost
+
+    payload = {"model": req.model, "input": input_payload}
+
+    try:
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(
+            None,
+            lambda: requests.post(
+                MINIMAX_URL, json=payload, headers=get_minimax_headers(), timeout=120
+            ),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"调用 MiniMax API 失败: {e}")
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"复刻失败: {resp.text}")
+
+    data = resp.json()
+    output = data.get("output") or {}
+    base_resp = output.get("base_resp") or {}
+    status_code = base_resp.get("status_code", -1)
+    if status_code != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"复刻失败 [{status_code}]: {base_resp.get('status_msg', 'unknown')}",
+        )
+
+    demo_audio = output.get("demo_audio")
+    if not demo_audio:
+        raise HTTPException(status_code=500, detail="未返回试听音频")
+
+    entry = {
+        "id": f"{req.voice_id}_{int(time.time())}",
+        "voice_id": req.voice_id,
+        "model": req.model,
+        "text": text,
+        "demo_audio": demo_audio,
+        "audio_url": public_url,
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "request_id": data.get("request_id"),
+        "characters": (data.get("usage") or {}).get("characters"),
+    }
+    registry = _load_minimax_registry()
+    registry.insert(0, entry)
+    _save_minimax_registry(registry)
+    return {"demo_audio": demo_audio, "voice_id": req.voice_id, "entry": entry}
+
+
+@app.get("/api/minimax/demos")
+async def minimax_list_demos():
+    return {"demos": _load_minimax_registry()}
+
+
+def _audio_bytes_to_8k_wav(audio_bytes: bytes) -> bytes:
+    """解码任意常见音频并重采样为 8kHz mono WAV。"""
+    import librosa
+
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+    try:
+        y, sr = librosa.load(tmp_path, sr=None, mono=True)
+        if sr != 8000:
+            y = soxr.resample(y, sr, 8000)
+        y_i16 = np.clip(y * 32768.0, -32768, 32767).astype(np.int16)
+        return _pcm_to_wav(y_i16.tobytes(), 8000)
+    finally:
+        pathlib.Path(tmp_path).unlink(missing_ok=True)
+
+
+@app.get("/api/minimax/play-8k")
+async def minimax_play_8k(url: str):
+    """代理拉取试听音频并转成 8k WAV，供前端播放。"""
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="无效的音频 URL")
+    try:
+        loop = asyncio.get_event_loop()
+
+        def _fetch_and_convert():
+            resp = requests.get(url, timeout=60)
+            if resp.status_code != 200:
+                raise RuntimeError(f"下载失败: HTTP {resp.status_code}")
+            return _audio_bytes_to_8k_wav(resp.content)
+
+        wav_data = await loop.run_in_executor(None, _fetch_and_convert)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"转 8k 失败: {e}")
+    return Response(content=wav_data, media_type="audio/wav")
+
+
+@app.delete("/api/minimax/demos/{demo_id}")
+async def minimax_delete_demo(demo_id: str):
+    registry = _load_minimax_registry()
+    new_registry = [d for d in registry if d.get("id") != demo_id]
+    if len(new_registry) == len(registry):
+        raise HTTPException(status_code=404, detail="试听记录不存在")
+    _save_minimax_registry(new_registry)
+    return {"ok": True}
+
+
 # ===== 视频音频提取 Routes =====
 
 @app.get("/extract", dependencies=[Depends(_verify_basic)])

@@ -110,6 +110,14 @@
     border-color: #0f766e;
   }
 
+  .card-minimax .card-icon {
+    background: linear-gradient(135deg, #ffedd5, #fdba74);
+  }
+
+  .card-minimax:hover {
+    border-color: #ea580c;
+  }
+
   .card h3 {
     font-size: 18px;
     font-weight: 700;
@@ -119,6 +127,7 @@
   .card-qwen h3 { color: #5b21b6; }
   .card-cosy h3 { color: #0e7490; }
   .card-extract h3 { color: #0f766e; }
+  .card-minimax h3 { color: #c2410c; }
 
   .card p {
     font-size: 13px;
@@ -149,6 +158,10 @@
     background: linear-gradient(135deg, #0f766e, #0e7490);
   }
 
+  .card-minimax .card-btn {
+    background: linear-gradient(135deg, #ea580c, #f59e0b);
+  }
+
   .tag {
     display: inline-block;
     font-size: 11px;
@@ -171,6 +184,11 @@
   .card-extract .tag {
     background: #d1fae5;
     color: #0f766e;
+  }
+
+  .card-minimax .tag {
+    background: #ffedd5;
+    color: #c2410c;
   }
 
   footer {
@@ -214,6 +232,14 @@
     <h3>CosyVoice 声音复刻</h3>
     <p>基于 CosyVoice 模型，支持高质量声音注册与克隆，音色还原度高，表现力丰富。</p>
     <span class="card-btn">进入 CosyVoice →</span>
+  </a>
+
+  <a href="/minimax" class="card card-minimax">
+    <div class="card-icon">🎵</div>
+    <span class="tag">MiniMax</span>
+    <h3>MiniMax 声音复刻</h3>
+    <p>基于 MiniMax 语音模型，上传参考音频即可克隆音色并生成试听音频，支持降噪与语种增强。</p>
+    <span class="card-btn">进入 MiniMax →</span>
   </a>
 
   <a href="/extract" class="card card-extract">

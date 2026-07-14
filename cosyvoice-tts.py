@@ -16,6 +16,7 @@
 import os
 import time
 import pyaudio
+import json
 import dashscope
 from dashscope.api_entities.dashscope_response import SpeechSynthesisResponse
 from dashscope.audio.tts_v2 import *
@@ -31,13 +32,13 @@ def get_timestamp():
 # 若没有配置环境变量，请用百炼API Key将下行替换为：dashscope.api_key = "sk-xxx"
 dashscope.api_key = os.environ.get('DASHSCOPE_API_KEY')
 
-# 以下为北京地域url，若使用新加坡地域的模型，需将url替换为：wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference
+# 以下为华北2（北京）地域的配置，调用时请将"{WorkspaceId}"替换为真实的业务空间ID，各地域的配置不同。
 dashscope.base_websocket_api_url='wss://dashscope.aliyuncs.com/api-ws/v1/inference'
 
 # 模型
-model = "cosyvoice-v3.5-plus"
+model = "cosyvoice-v3.5-flash"
 # 音色
-voice = "cosyvoice-v3.5-plus-liaokai2-e96f55da5c6f4372bfa9c28876c8480f"
+voice = "cosyvoice-v3.5-flash-chengna-36783aa020fb4fb399a041f943870f3b"
 
 
 # 定义回调接口
@@ -49,7 +50,7 @@ class Callback(ResultCallback):
         print("连接建立：" + get_timestamp())
         self._player = pyaudio.PyAudio()
         self._stream = self._player.open(
-            format=pyaudio.paInt16, channels=1, rate=8000, output=True
+            format=pyaudio.paInt16, channels=1, rate=22050, output=True
         )
 
     def on_complete(self):
@@ -66,7 +67,13 @@ class Callback(ResultCallback):
         self._player.terminate()
 
     def on_event(self, message):
-        pass
+        # 解析服务端事件，获取输出信息
+        data = json.loads(message)
+        output = data.get('payload', {}).get('output', {})
+        event_type = output.get('type', '')
+        original_text = output.get('original_text', '')
+        if event_type:
+            print(f"事件类型: {event_type}, 原始文本: {original_text}")
 
     def on_data(self, data: bytes) -> None:
         print(get_timestamp() + " 二进制音频长度为：" + str(len(data)))
@@ -95,9 +102,8 @@ test_text = [
 synthesizer = SpeechSynthesizer(
     model=model,
     voice=voice,
-    format=AudioFormat.PCM_8000HZ_MONO_16BIT,
+    format=AudioFormat.PCM_22050HZ_MONO_16BIT,  
     callback=callback,
-    
 )
 
 

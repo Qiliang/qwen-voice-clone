@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MiniMax 声音复刻</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f1f5f9;
+    color: #1e293b;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    background: linear-gradient(135deg, #ea580c, #f59e0b);
+    color: #fff;
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(234,88,12,.3);
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  header span { font-size: 13px; opacity: .75; }
+  header .nav-link {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.15);
+    color: #fff;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background .2s;
+    white-space: nowrap;
+  }
+  header .nav-link:hover { background: rgba(255,255,255,.28); }
+
+  .page {
+    flex: 1;
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 20px 18px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    border: 1.5px solid #e2e8f0;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+
+  textarea#clone-text {
+    width: 100%;
+    min-height: 120px;
+    padding: 10px 12px;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 14px;
+    resize: vertical;
+    color: #1e293b;
+    line-height: 1.6;
+    font-family: inherit;
+    transition: border-color .2s;
+  }
+  textarea#clone-text:focus { outline: none; border-color: #ea580c; }
+  textarea#clone-text::placeholder { color: #94a3b8; }
+
+  .upload-area {
+    border: 2px dashed #e2e8f0;
+    border-radius: 10px;
+    padding: 14px;
+    transition: border-color .2s;
+  }
+  .upload-area:hover { border-color: #fdba74; }
+
+  .upload-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .file-input-wrap {
+    position: relative;
+    flex: 1;
+  }
+  .file-input-wrap input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+  }
+  .file-input-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #475569;
+    background: #f8fafc;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  select#history-select {
+    flex: 1;
+    max-width: 240px;
+    padding: 7px 10px;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #475569;
+    background: #fff;
+    outline: none;
+  }
+  select#history-select:focus { border-color: #ea580c; }
+
+  .waveform-wrap {
+    position: relative;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #f8fafc;
+    cursor: crosshair;
+  }
+  #waveform {
+    display: block;
+    width: 100%;
+    height: 100px;
+  }
+  .waveform-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0 0;
+  }
+  .time-info {
+    font-size: 12px;
+    color: #64748b;
+    font-family: monospace;
+  }
+
+  .form-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex: 1;
+    min-width: 160px;
+  }
+  .form-group label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #475569;
+  }
+  .form-group input, .form-group select {
+    padding: 8px 12px;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #1e293b;
+    outline: none;
+    background: #fff;
+    transition: border-color .2s;
+  }
+  .form-group input:focus, .form-group select:focus { border-color: #ea580c; }
+  .form-group input.invalid { border-color: #ef4444; }
+  .form-hint { font-size: 11px; color: #94a3b8; }
+
+  .voice-id-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .voice-id-row input { flex: 1; }
+
+  .options-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .check-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #475569;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .15s, opacity .15s;
+  }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: #ea580c; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #c2410c; }
+  .btn-success { background: #10b981; color: #fff; }
+  .btn-success:hover:not(:disabled) { background: #059669; }
+  .btn-danger { background: #ef4444; color: #fff; }
+  .btn-danger:hover:not(:disabled) { background: #dc2626; }
+  .btn-ghost {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1.5px solid #e2e8f0;
+  }
+  .btn-ghost:hover:not(:disabled) { background: #e2e8f0; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-lg { padding: 10px 20px; font-size: 14px; width: 100%; justify-content: center; }
+
+  .demo-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  #demo-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .demo-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fafafa;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .demo-item:hover { border-color: #fdba74; box-shadow: 0 1px 4px rgba(234,88,12,.08); }
+  .demo-item.playing { border-color: #ea580c; background: #fff7ed; }
+
+  .demo-info { flex: 1; min-width: 0; }
+  .demo-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1e293b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .demo-meta {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-top: 2px;
+    font-family: monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .demo-text {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 4px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .demo-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+    margin-left: 10px;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 28px 16px;
+    color: #94a3b8;
+    font-size: 14px;
+  }
+
+  #toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 9999;
+  }
+  .toast {
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(0,0,0,.15);
+    animation: slideIn .25s ease;
+    max-width: 360px;
+  }
+  .toast.success { background: #10b981; }
+  .toast.error { background: #ef4444; }
+  .toast.info { background: #ea580c; }
+  @keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MiniMax 声音复刻</h1>
+  <span>阿里云百炼 · MiniMax Voice Clone</span>
+  <a href="/" class="nav-link">← 返回首页</a>
+</header>
+
+<div class="page">
+
+  <!-- 1. 试听文本 -->
+  <div class="card">
+    <div class="card-title">试听文本</div>
+    <textarea id="clone-text" maxlength="1000" placeholder="输入复刻后期望试听的内容（1000 字符以内）">今天天气怎么样？</textarea>
+    <div class="form-hint">试听将按字符数收取语音合成费用 · 最长 1000 字符</div>
+  </div>
+
+  <!-- 2. 上传 / 历史音频 -->
+  <div class="card">
+    <div class="card-title">参考音频</div>
+    <div class="upload-area">
+      <div class="upload-row">
+        <div class="file-input-wrap">
+          <input type="file" id="audio-file-input" accept=".mp3,.wav,.m4a,.MP3,.WAV,.M4A" onchange="onFileSelected(this)">
+          <div class="file-input-label" id="file-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            上传音频
+          </div>
+        </div>
+        <select id="history-select" onchange="onHistorySelect(this)">
+          <option value="">历史音频…</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-hint">格式 mp3 / m4a / wav · 剪辑后时长需 10 秒 ~ 5 分钟 · 不超过 20MB</div>
+
+    <!-- 3. 波形剪辑 -->
+    <div>
+      <div class="waveform-wrap" id="waveform-wrap">
+        <canvas id="waveform"></canvas>
+      </div>
+      <div class="waveform-controls">
+        <span class="time-info" id="clip-time">请上传音频文件</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" id="btn-preview" onclick="togglePreview()" disabled>▶ 试听片段</button>
+          <button class="btn btn-ghost btn-sm" onclick="resetClip()" id="btn-reset-clip" disabled>重置剪辑</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. 音色名称 + 试听 -->
+  <div class="card">
+    <div class="card-title">克隆试听</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>音色名称 voice_id（15 位英文）</label>
+        <div class="voice-id-row">
+          <input type="text" id="voice-name" maxlength="15" placeholder="随机英文名称" pattern="[A-Za-z][A-Za-z0-9_-]*[A-Za-z0-9]">
+          <button class="btn btn-ghost" type="button" onclick="randomVoiceName()">🎲 随机</button>
+        </div>
+        <div class="form-hint">首字母、末位非 -/_，仅字母数字-_，全局唯一</div>
+      </div>
+      <div class="form-group">
+        <label>模型</label>
+        <select id="target-model">
+          <option value="MiniMax/speech-2.8-turbo" selected>MiniMax/speech-2.8-turbo</option>
+          <option value="MiniMax/speech-2.8-hd">MiniMax/speech-2.8-hd</option>
+          <option value="MiniMax/speech-02-turbo">MiniMax/speech-02-turbo</option>
+          <option value="MiniMax/speech-02-hd">MiniMax/speech-02-hd</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>语种增强</label>
+        <select id="language-boost">
+          <option value="">不设置</option>
+          <option value="auto">auto</option>
+          <option value="Chinese">Chinese</option>
+          <option value="Chinese,Yue">Chinese,Yue</option>
+          <option value="English">English</option>
+        </select>
+      </div>
+    </div>
+    <div class="options-row">
+      <label class="check-label"><input type="checkbox" id="need-noise-reduction"> 开启降噪</label>
+      <label class="check-label"><input type="checkbox" id="need-volume-normalization"> 音量归一化</label>
+    </div>
+    <button class="btn btn-primary btn-lg" id="btn-clone" onclick="cloneVoice()" disabled>试听</button>
+    <div class="form-hint" id="clone-ready-hint" style="color:#ef4444"></div>
+  </div>
+
+  <!-- 5. 历史试听列表 -->
+  <div class="card">
+    <div class="demo-list-header">
+      <div class="card-title" style="margin:0">历史试听</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadDemos()" id="btn-refresh">刷新</button>
+    </div>
+    <div id="demo-list">
+      <div class="empty-state">加载中…</div>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+// ===== State =====
+let audioBuffer = null;
+let waveformData = null;
+let audioDuration = 0;
+let clipStart = 0;
+let clipEnd = 0;
+let dragging = null;
+let audioCtx = null;
+let previewSource = null;
+let previewStartTime = 0;
+let previewRafId = null;
+let demos = [];
+let currentDemoAudio = null;
+let currentDemoSource = null;
+let currentPlayingDemoId = null;
+
+// ===== Init =====
+document.addEventListener('DOMContentLoaded', () => {
+  randomVoiceName();
+  loadHistory();
+  loadDemos();
+  initCanvas();
+  checkCloneReady();
+});
+
+document.getElementById('clone-text').addEventListener('input', checkCloneReady);
+document.getElementById('voice-name').addEventListener('input', function () {
+  const ok = isValidVoiceId(this.value);
+  this.classList.toggle('invalid', !ok && this.value.length > 0);
+  checkCloneReady();
+});
+
+// ===== Toast =====
+function toast(msg, type = 'info', duration = 3000) {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), duration);
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ===== Voice ID =====
+function isValidVoiceId(v) {
+  // API: 长度 [8,256]，首字母，末位非 -/_，仅字母数字-_
+  // 页面约定：15 位英文
+  return /^[A-Za-z][A-Za-z0-9]{13}[A-Za-z0-9]$/.test(v);
+}
+
+function randomVoiceName() {
+  const letters = 'abcdefghijklmnopqrstuvwxyz';
+  const alnum = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let s = letters[Math.floor(Math.random() * letters.length)];
+  for (let i = 0; i < 14; i++) s += alnum[Math.floor(Math.random() * alnum.length)];
+  document.getElementById('voice-name').value = s;
+  document.getElementById('voice-name').classList.remove('invalid');
+  checkCloneReady();
+}
+
+function getCloneBlockReason() {
+  const name = document.getElementById('voice-name').value.trim();
+  const text = document.getElementById('clone-text').value.trim();
+  if (!text) return '请先输入试听文本';
+  if (!audioBuffer) return '请先上传或选择参考音频';
+  if (!isValidVoiceId(name)) return `音色名称须为 15 位英文（当前 ${name.length} 位）`;
+  const dur = clipEnd - clipStart;
+  if (dur < 10) return `剪辑时长需 ≥10 秒（当前 ${dur.toFixed(1)} 秒），请拉长左右边界`;
+  if (dur > 300) return `剪辑时长需 ≤5 分钟（当前 ${(dur / 60).toFixed(1)} 分钟）`;
+  return '';
+}
+
+function checkCloneReady() {
+  const reason = getCloneBlockReason();
+  document.getElementById('btn-clone').disabled = !!reason;
+  const hint = document.getElementById('clone-ready-hint');
+  hint.textContent = reason;
+  hint.style.color = reason ? '#ef4444' : '#94a3b8';
+}
+
+// ===== Upload History =====
+async function loadHistory() {
+  try {
+    const resp = await fetch('/api/uploads');
+    const data = await resp.json();
+    const sel = document.getElementById('history-select');
+    sel.innerHTML = '<option value="">历史音频…</option>';
+    (data.files || []).forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f.filename;
+      opt.textContent = `${f.filename} (${formatBytes(f.size)})`;
+      sel.appendChild(opt);
+    });
+  } catch (e) {}
+}
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+
+async function onFileSelected(input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('file-label').textContent = file.name;
+  document.getElementById('history-select').value = '';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    await fetch('/api/upload', { method: 'POST', body: fd });
+    await loadHistory();
+  } catch (e) {}
+  loadAudioFromFile(file);
+}
+
+async function onHistorySelect(sel) {
+  const filename = sel.value;
+  if (!filename) return;
+  document.getElementById('file-label').textContent = filename;
+  document.getElementById('audio-file-input').value = '';
+  loadAudioFromUrl(`/api/uploads/${encodeURIComponent(filename)}`);
+}
+
+async function loadAudioFromFile(file) {
+  decodeAudio(await file.arrayBuffer());
+}
+
+async function loadAudioFromUrl(url) {
+  try {
+    const resp = await fetch(url);
+    decodeAudio(await resp.arrayBuffer());
+  } catch (e) {
+    toast('加载音频失败', 'error');
+  }
+}
+
+async function decodeAudio(arrayBuffer) {
+  if (!audioCtx) audioCtx = new AudioContext();
+  try {
+    audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+    audioDuration = audioBuffer.duration;
+    clipStart = 0;
+    clipEnd = audioDuration;
+    // 默认截取前 30 秒（若超过）；不足 10 秒则用全长
+    if (clipEnd > 30) clipEnd = 30;
+    if (audioDuration < 10) {
+      toast(`参考音频仅 ${audioDuration.toFixed(1)} 秒，MiniMax 要求至少 10 秒，请换更长音频`, 'error', 6000);
+    }
+    waveformData = computeWaveformData(audioBuffer);
+    drawWaveform();
+    updateClipTimeInfo();
+    document.getElementById('btn-preview').disabled = false;
+    document.getElementById('btn-reset-clip').disabled = false;
+    checkCloneReady();
+  } catch (e) {
+    toast('音频解码失败，请检查文件格式', 'error');
+  }
+}
+
+// ===== Waveform =====
+function computeWaveformData(buf) {
+  const canvas = document.getElementById('waveform');
+  const numBins = canvas.width || 600;
+  const ch = buf.getChannelData(0);
+  const spb = Math.floor(ch.length / numBins) || 1;
+  const data = new Float32Array(numBins);
+  for (let i = 0; i < numBins; i++) {
+    let max = 0;
+    for (let j = 0; j < spb; j++) {
+      const a = Math.abs(ch[i * spb + j] || 0);
+      if (a > max) max = a;
+    }
+    data[i] = max;
+  }
+  return data;
+}
+
+function initCanvas() {
+  const canvas = document.getElementById('waveform');
+  const wrap = document.getElementById('waveform-wrap');
+
+  function resize() {
+    canvas.width = wrap.clientWidth;
+    canvas.height = 100;
+    if (waveformData && audioBuffer) {
+      waveformData = computeWaveformData(audioBuffer);
+    }
+    drawWaveform();
+  }
+  new ResizeObserver(resize).observe(wrap);
+  resize();
+
+  canvas.addEventListener('mousedown', onCanvasMouseDown);
+  canvas.addEventListener('mousemove', onCanvasMouseMove);
+  canvas.addEventListener('mouseup', onCanvasMouseUp);
+  canvas.addEventListener('mouseleave', onCanvasMouseUp);
+  canvas.addEventListener('touchstart', e => {
+    const touch = e.touches[0];
+    onCanvasMouseDown({ clientX: touch.clientX, clientY: touch.clientY, target: canvas, _rect: canvas.getBoundingClientRect() });
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', e => {
+    onCanvasMouseMove({ clientX: e.touches[0].clientX });
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener('touchend', onCanvasMouseUp);
+  drawWaveform();
+}
+
+function drawWaveform() {
+  const canvas = document.getElementById('waveform');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(0, 0, w, h);
+
+  if (!waveformData) {
+    ctx.fillStyle = '#cbd5e1';
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('请上传音频文件', w / 2, h / 2);
+    return;
+  }
+
+  const startX = (clipStart / audioDuration) * w;
+  const endX = (clipEnd / audioDuration) * w;
+
+  ctx.fillStyle = 'rgba(234,88,12,0.08)';
+  ctx.fillRect(startX, 0, endX - startX, h);
+
+  const numBins = waveformData.length;
+  const barW = w / numBins;
+  for (let i = 0; i < numBins; i++) {
+    const x = i * barW;
+    const amp = waveformData[i];
+    const barH = Math.max(2, amp * (h - 4));
+    const y = (h - barH) / 2;
+    const isIn = x >= startX && x <= endX;
+    ctx.fillStyle = isIn ? '#f97316' : '#cbd5e1';
+    ctx.fillRect(x + 0.5, y, Math.max(1, barW - 1), barH);
+  }
+
+  const drawHandle = (xPos, label, isLeft) => {
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(xPos, 0);
+    ctx.lineTo(xPos, h);
+    ctx.stroke();
+    const gw = 10, gh = 20;
+    const gx = isLeft ? xPos : xPos - gw;
+    const gy = (h - gh) / 2;
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.roundRect(gx, gy, gw, gh, 3);
+    ctx.fill();
+    ctx.fillStyle = '#ef4444';
+    ctx.font = 'bold 11px monospace';
+    ctx.textBaseline = 'top';
+    ctx.textAlign = isLeft ? 'left' : 'right';
+    ctx.fillText(label, isLeft ? xPos + 13 : xPos - 13, 3);
+  };
+
+  drawHandle(startX, formatTime(clipStart), true);
+  drawHandle(endX, formatTime(clipEnd), false);
+
+  if (endX - startX > 60) {
+    ctx.fillStyle = 'rgba(234,88,12,.6)';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`${formatTime(clipEnd - clipStart)}`, (startX + endX) / 2, h - 3);
+  }
+
+  const playPos = getPreviewProgress();
+  if (playPos !== null) {
+    const px = (playPos / audioDuration) * w;
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, h);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#f59e0b';
+    ctx.font = 'bold 11px monospace';
+    ctx.textBaseline = 'bottom';
+    ctx.textAlign = px > w / 2 ? 'right' : 'left';
+    ctx.fillText(formatTime(playPos), px + (px > w / 2 ? -4 : 4), h - 3);
+  }
+}
+
+function onCanvasMouseDown(e) {
+  if (!waveformData) return;
+  const canvas = document.getElementById('waveform');
+  const rect = e._rect || canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const startFrac = clipStart / audioDuration;
+  const endFrac = clipEnd / audioDuration;
+  const threshold = 12 / canvas.width;
+  if (Math.abs(x - startFrac) < threshold) dragging = 'left';
+  else if (Math.abs(x - endFrac) < threshold) dragging = 'right';
+}
+
+function onCanvasMouseMove(e) {
+  if (!dragging || !waveformData) return;
+  const canvas = document.getElementById('waveform');
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const t = x * audioDuration;
+  const minGap = 0.1;
+  if (dragging === 'left') clipStart = Math.max(0, Math.min(t, clipEnd - minGap));
+  else clipEnd = Math.min(audioDuration, Math.max(t, clipStart + minGap));
+  drawWaveform();
+  updateClipTimeInfo();
+  checkCloneReady();
+}
+
+function onCanvasMouseUp() { dragging = null; }
+
+function updateClipTimeInfo() {
+  const info = document.getElementById('clip-time');
+  if (!waveformData) {
+    info.textContent = '请上传音频文件';
+    return;
+  }
+  const dur = clipEnd - clipStart;
+  const warn = dur < 10 ? ' ⚠ 需 ≥10 秒' : (dur > 300 ? ' ⚠ 需 ≤5 分钟' : '');
+  info.textContent = `剪辑: ${formatTime(clipStart)} ~ ${formatTime(clipEnd)}  时长: ${formatTime(dur)}  (总: ${formatTime(audioDuration)})${warn}`;
+}
+
+function resetClip() {
+  if (!audioBuffer) return;
+  clipStart = 0;
+  clipEnd = Math.min(audioDuration, 30);
+  drawWaveform();
+  updateClipTimeInfo();
+  checkCloneReady();
+}
+
+function formatTime(secs) {
+  const m = Math.floor(secs / 60);
+  const s = (secs % 60).toFixed(1).padStart(4, '0');
+  return `${m}:${s}`;
+}
+
+const PLAYBACK_SR = 8000;
+
+/** 将 AudioBuffer 重采样为 8k mono */
+async function resampleBufferTo8k(buf, startSec = 0, durationSec = null) {
+  const dur = durationSec == null ? buf.duration - startSec : durationSec;
+  if (dur <= 0) throw new Error('音频时长无效');
+  const length = Math.max(1, Math.ceil(dur * PLAYBACK_SR));
+  const offline = new OfflineAudioContext(1, length, PLAYBACK_SR);
+  const src = offline.createBufferSource();
+  src.buffer = buf;
+  src.connect(offline.destination);
+  src.start(0, startSec, dur);
+  return await offline.startRendering();
+}
+
+// ===== Preview（试听片段，8k）=====
+async function togglePreview() {
+  if (!audioBuffer) return;
+  if (previewSource) { stopPreview(); return; }
+  stopDemoPlayback();
+  if (!audioCtx) audioCtx = new AudioContext();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+  const btn = document.getElementById('btn-preview');
+  btn.disabled = true;
+  btn.textContent = '转换中…';
+  try {
+    const buf8k = await resampleBufferTo8k(audioBuffer, clipStart, clipEnd - clipStart);
+    previewSource = audioCtx.createBufferSource();
+    previewSource.buffer = buf8k;
+    previewSource.connect(audioCtx.destination);
+    // 进度按原始时间轴显示，用 8k buffer 的实时播放位置换算
+    previewStartTime = audioCtx.currentTime;
+    previewSource.onended = () => stopPreview(false);
+    previewSource.start(0);
+    btn.disabled = false;
+    btn.textContent = '⬛ 停止';
+    startPreviewRaf();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '▶ 试听片段';
+    toast(`试听失败: ${e.message}`, 'error');
+  }
+}
+
+function stopPreview(stopSource = true) {
+  if (stopSource && previewSource) {
+    try { previewSource.stop(); } catch (_) {}
+  }
+  previewSource = null;
+  cancelAnimationFrame(previewRafId);
+  previewRafId = null;
+  const btn = document.getElementById('btn-preview');
+  if (btn) {
+    btn.disabled = !audioBuffer;
+    btn.textContent = '▶ 试听片段';
+  }
+  drawWaveform();
+}
+
+function startPreviewRaf() {
+  function tick() {
+    if (!previewSource) return;
+    drawWaveform();
+    previewRafId = requestAnimationFrame(tick);
+  }
+  previewRafId = requestAnimationFrame(tick);
+}
+
+function getPreviewProgress() {
+  if (!previewSource || !audioCtx) return null;
+  const pos = clipStart + (audioCtx.currentTime - previewStartTime);
+  return pos > clipEnd ? null : pos;
+}
+
+// ===== Clone =====
+async function cloneVoice() {
+  const reason = getCloneBlockReason();
+  if (reason) {
+    toast(reason, 'error', 5000);
+    return;
+  }
+
+  const name = document.getElementById('voice-name').value.trim();
+  const text = document.getElementById('clone-text').value.trim();
+  const btn = document.getElementById('btn-clone');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> 克隆中…';
+
+  try {
+    const audioData = await getClippedAudioBase64();
+    const body = {
+      voice_id: name,
+      text,
+      audio_data: audioData,
+      model: document.getElementById('target-model').value,
+      need_noise_reduction: document.getElementById('need-noise-reduction').checked,
+      need_volume_normalization: document.getElementById('need-volume-normalization').checked,
+    };
+    const lang = document.getElementById('language-boost').value;
+    if (lang) body.language_boost = lang;
+
+    const resp = await fetch('/api/minimax/clone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
+
+    toast(`克隆成功！voice_id: ${data.voice_id}`, 'success', 5000);
+    randomVoiceName();
+    await loadDemos();
+    if (data.demo_audio) playDemoUrl(data.demo_audio, data.entry?.id);
+  } catch (e) {
+    toast(`克隆失败: ${e.message}`, 'error', 6000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '试听';
+    checkCloneReady();
+  }
+}
+
+async function getClippedAudioBase64() {
+  const startSample = Math.floor(clipStart * audioBuffer.sampleRate);
+  const endSample = Math.floor(clipEnd * audioBuffer.sampleRate);
+  const numSamples = endSample - startSample;
+  const sampleRate = audioBuffer.sampleRate;
+  const bytesPerSample = 2;
+  const numChannels = 1;
+
+  const buf = new ArrayBuffer(44 + numSamples * bytesPerSample);
+  const view = new DataView(buf);
+  const ws = (offset, str) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  ws(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples * bytesPerSample, true);
+  ws(8, 'WAVE');
+  ws(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  ws(36, 'data');
+  view.setUint32(40, numSamples * bytesPerSample, true);
+
+  const channels = [];
+  for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
+    channels.push(audioBuffer.getChannelData(c));
+  }
+  let offset = 44;
+  for (let i = startSample; i < endSample; i++) {
+    let sum = 0;
+    for (const ch of channels) sum += (ch[i] || 0);
+    const s = Math.max(-1, Math.min(1, sum / channels.length));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    offset += 2;
+  }
+
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}
+
+// ===== Demo History =====
+async function loadDemos() {
+  const btn = document.getElementById('btn-refresh');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/minimax/demos');
+    const data = await resp.json();
+    demos = data.demos || [];
+    renderDemoList();
+  } catch (e) {
+    toast('加载试听列表失败', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderDemoList() {
+  const list = document.getElementById('demo-list');
+  if (!demos.length) {
+    list.innerHTML = `<div class="empty-state">暂无试听记录，点击上方「试听」开始克隆</div>`;
+    return;
+  }
+  list.innerHTML = demos.map(d => {
+    const id = escHtml(d.id);
+    const playing = currentPlayingDemoId === d.id ? ' playing' : '';
+    return `
+    <div class="demo-item${playing}" id="demo-${id}">
+      <div class="demo-info">
+        <div class="demo-name">${escHtml(d.voice_id)}</div>
+        <div class="demo-meta">${escHtml(d.created_at || '')} · ${escHtml(d.model || '')}</div>
+        <div class="demo-text">${escHtml(d.text || '')}</div>
+      </div>
+      <div class="demo-actions">
+        <button class="btn btn-success btn-sm" onclick="playDemo('${id}')">▶ 播放</button>
+        <button class="btn btn-ghost btn-sm" onclick="downloadDemo('${id}')">⬇ 下载</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteDemo('${id}')">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function findDemo(id) {
+  return demos.find(d => d.id === id);
+}
+
+function playDemo(id) {
+  const d = findDemo(id);
+  if (!d?.demo_audio) { toast('无试听链接', 'error'); return; }
+  playDemoUrl(d.demo_audio, id);
+}
+
+function stopDemoPlayback() {
+  if (currentDemoSource) {
+    try { currentDemoSource.stop(); } catch (_) {}
+    currentDemoSource = null;
+  }
+  if (currentDemoAudio) {
+    try { currentDemoAudio.pause(); } catch (_) {}
+    currentDemoAudio = null;
+  }
+  currentPlayingDemoId = null;
+}
+
+async function playDemoUrl(url, id) {
+  stopPreview();
+  stopDemoPlayback();
+  currentPlayingDemoId = id || null;
+  renderDemoList();
+
+  // 经后端代理转成 8k WAV，避免 CORS 并统一采样率
+  const playUrl = `/api/minimax/play-8k?url=${encodeURIComponent(url)}`;
+  const audio = new Audio(playUrl);
+  currentDemoAudio = audio;
+  audio.onended = () => {
+    currentPlayingDemoId = null;
+    currentDemoAudio = null;
+    renderDemoList();
+  };
+  audio.onerror = () => {
+    toast('播放失败（链接可能已过期或转码失败）', 'error');
+    currentPlayingDemoId = null;
+    currentDemoAudio = null;
+    renderDemoList();
+  };
+  try {
+    await audio.play();
+  } catch (e) {
+    toast(`播放失败: ${e.message}`, 'error');
+    currentPlayingDemoId = null;
+    currentDemoAudio = null;
+    renderDemoList();
+  }
+}
+
+async function downloadDemo(id) {
+  const d = findDemo(id);
+  if (!d?.demo_audio) { toast('无试听链接', 'error'); return; }
+  try {
+    const resp = await fetch(d.demo_audio);
+    if (!resp.ok) throw new Error('下载失败');
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${d.voice_id || 'demo'}.mp3`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    // 跨域时直接打开链接
+    window.open(d.demo_audio, '_blank');
+  }
+}
+
+async function deleteDemo(id) {
+  if (!confirm('确定删除这条试听记录？')) return;
+  try {
+    const resp = await fetch(`/api/minimax/demos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      const data = await resp.json();
+      throw new Error(data.detail || '删除失败');
+    }
+    if (currentPlayingDemoId === id) {
+      stopDemoPlayback();
+      renderDemoList();
+    }
+    toast('已删除', 'success');
+    await loadDemos();
+  } catch (e) {
+    toast(`删除失败: ${e.message}`, 'error');
+  }
+}
+</script>
+</body>
+</html>

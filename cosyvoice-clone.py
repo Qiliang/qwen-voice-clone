@@ -7,9 +7,9 @@ import dashscope
 from dashscope.audio.tts_v2 import VoiceEnrollmentService, SpeechSynthesizer
 from dashscope.audio.tts_v2.speech_synthesizer import AudioFormat
 
+from rustfs import upload_file
+
 OUTPUT_SAMPLE_RATE = 8000
-
-
 
 
 def main(text="恭喜，已成功复刻并合成了属于自己的声音！", voice_id = None):
@@ -26,13 +26,16 @@ def main(text="恭喜，已成功复刻并合成了属于自己的声音！", vo
 
 
     # 2. 定义复刻参数
-    TARGET_MODEL = "cosyvoice-v3.5-plus" 
+    TARGET_MODEL = "cosyvoice-v3.5-flash" 
     # 为音色起一个有意义的前缀
-    VOICE_PREFIX = "liaokai2" # 仅允许数字和小写字母，小于十个字符
-    # 公网可访问音频URL
-    AUDIO_URL = "http://120.46.43.62:31676/public/liaokai2.mp3" 
+    VOICE_PREFIX = "chengna" # 仅允许数字和小写字母，小于十个字符
 
     if not voice_id:
+        # 本地音频路径：先上传到 rustfs，再使用返回的公网地址
+        AUDIO_PATH = "/Users/xiaoql/Downloads/合力咨询_程娜_1_clip1.wav"
+        AUDIO_URL = upload_file(AUDIO_PATH)
+        print(f"Uploaded to rustfs: {AUDIO_URL}")
+
         # 3. 创建音色 (异步任务)
         print("--- Step 1: Creating voice enrollment ---")
         service = VoiceEnrollmentService()
@@ -75,6 +78,7 @@ def main(text="恭喜，已成功复刻并合成了属于自己的声音！", vo
 
     # 5. 使用复刻音色进行语音合成
     print("\n--- Step 3: Synthesizing speech with the voice ---")
+    print(f"Using voice_id: {voice_id}")
     try:
         synthesizer = SpeechSynthesizer(
             model=TARGET_MODEL, 
@@ -85,7 +89,13 @@ def main(text="恭喜，已成功复刻并合成了属于自己的声音！", vo
         
         # call()方法返回二进制音频数据
         audio_data = synthesizer.call(text_to_synthesize)
-        print(f"Speech synthesis successful. Request ID: {synthesizer.get_last_request_id()}")
+        request_id = synthesizer.get_last_request_id()
+        if not audio_data:
+            raise RuntimeError(
+                f"Speech synthesis returned empty audio. Request ID: {request_id}. "
+                "Usually means voice_id is invalid / not OK, or model/voice mismatch (error 418)."
+            )
+        print(f"Speech synthesis successful. Request ID: {request_id}")
 
         # 6. 保存音频文件
         output_file = "my_custom_voice_output.wav"
@@ -98,12 +108,16 @@ def main(text="恭喜，已成功复刻并合成了属于自己的声音！", vo
 
     except Exception as e:
         print(f"Error during speech synthesis: {e}")
+        raise
 
 
 
 if __name__ == "__main__":
     text="""
-这个记者俱乐部将成为该部门发放资讯的唯一渠道
+嗯，可以，我们客服系统的话，功能比较全面，像在线通话工单这些功能都包括的。您这边主要是哪一个模块的需求呢？嗯，可以通话的话，是否在智能接听那个需求呢？
     """
-    voice_id = "cosyvoice-v3.5-plus-liaokai2-e96f55da5c6f4372bfa9c28876c8480f"
+    # 传 None 会走上传 + 复刻；有可用 voice_id 时可直接传入跳过复刻
+    # voice_id = "cosyvoice-v3.5-plus-chengna-9b3ca8ec0c214c46af9d8031de3d5cad"
+    voice_id = "cosyvoice-v3.5-flash-chengna-36783aa020fb4fb399a041f943870f3b"
+    # voice_id = None
     main(text, voice_id)
