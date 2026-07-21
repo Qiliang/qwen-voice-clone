@@ -102,6 +102,14 @@
     border-color: #0891b2;
   }
 
+  .card-qwen-audio .card-icon {
+    background: linear-gradient(135deg, #ccfbf1, #5eead4);
+  }
+
+  .card-qwen-audio:hover {
+    border-color: #0d9488;
+  }
+
   .card-extract .card-icon {
     background: linear-gradient(135deg, #d1fae5, #6ee7b7);
   }
@@ -126,6 +134,7 @@
 
   .card-qwen h3 { color: #5b21b6; }
   .card-cosy h3 { color: #0e7490; }
+  .card-qwen-audio h3 { color: #0f766e; }
   .card-extract h3 { color: #0f766e; }
   .card-minimax h3 { color: #c2410c; }
 
@@ -154,6 +163,10 @@
     background: linear-gradient(135deg, #0891b2, #0e7490);
   }
 
+  .card-qwen-audio .card-btn {
+    background: linear-gradient(135deg, #0d9488, #059669);
+  }
+
   .card-extract .card-btn {
     background: linear-gradient(135deg, #0f766e, #0e7490);
   }
@@ -179,6 +192,11 @@
   .card-cosy .tag {
     background: #cffafe;
     color: #0e7490;
+  }
+
+  .card-qwen-audio .tag {
+    background: #ccfbf1;
+    color: #0f766e;
   }
 
   .card-extract .tag {
@@ -232,6 +250,14 @@
     <h3>CosyVoice 声音复刻</h3>
     <p>基于 CosyVoice 模型，支持高质量声音注册与克隆，音色还原度高，表现力丰富。</p>
     <span class="card-btn">进入 CosyVoice →</span>
+  </a>
+
+  <a href="/qwen-audio" class="card card-qwen-audio">
+    <div class="card-icon">🎧</div>
+    <span class="tag">Qwen-Audio</span>
+    <h3>Qwen-Audio 声音复刻</h3>
+    <p>基于 Qwen-Audio-TTS 模型，上传参考音频即可复刻音色，支持试听回放与下载。</p>
+    <span class="card-btn">进入 Qwen-Audio →</span>
   </a>
 
   <a href="/minimax" class="card card-minimax">

@@ -1,0 +1,4 @@
+
+
+加一个qwen-audio声音复刻页面，和cosyvoice-clone.html类似，但是使用qwen-audio-tts模型。
+音色列表等api都与cosyvoice类似。复刻听声音可以回放和下载，可以参考qwen-voice-clone.html中的处理。

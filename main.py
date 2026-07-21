@@ -162,6 +162,92 @@ def _run_cosyvoice_tts(text: str, voice: str, model: str, sample_rate: int, mode
     return _pcm_to_wav(src_pcm, sample_rate)
 
 
+def _qwen_audio_api_bases() -> tuple[str, str]:
+    """返回 (http_base, websocket_base)。若配置了 Workspace ID 则走北京 MaaS 专属域名。"""
+    workspace_id = os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip()
+    if workspace_id:
+        return (
+            f"https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1",
+            f"wss://{workspace_id}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference",
+        )
+    return COSYVOICE_HTTP_URL, COSYVOICE_WS_URL
+
+
+def _format_qwen_audio_tts_error(err: str) -> str:
+    if "Model.AccessDenied" in err or "Model access denied" in err:
+        return (
+            "模型无访问权限 (Model.AccessDenied)。请在百炼控制台确认已开通 "
+            "qwen-audio-3.0-tts-flash，并设置 DASHSCOPE_WORKSPACE_ID 后重试"
+        )
+    return err
+
+
+def _run_qwen_audio_tts(
+    text: str,
+    voice: str,
+    model: str,
+    sample_rate: int = 8000,
+    mode: str = "line",
+    speech_rate: float = 1.0,
+    pitch_rate: float = 1.0,
+) -> bytes:
+    """Qwen-Audio 单向流式 TTS：按指定采样率输出 PCM，再封装为 WAV。"""
+    if mode == "line":
+        text_to_synth = "\n".join(ln for ln in text.split("\n") if ln.strip())
+    else:
+        # 单向流式不支持逐字推流，整段一次提交
+        text_to_synth = text.strip()
+    if not text_to_synth:
+        raise ValueError("文本内容为空")
+
+    if sample_rate == 16000:
+        audio_format = CosyAudioFormat.PCM_16000HZ_MONO_16BIT
+    elif sample_rate == 24000:
+        audio_format = CosyAudioFormat.PCM_24000HZ_MONO_16BIT
+    else:
+        sample_rate = 8000
+        audio_format = CosyAudioFormat.PCM_8000HZ_MONO_16BIT
+
+    http_base, ws_base = _qwen_audio_api_bases()
+    dashscope.base_http_api_url = http_base
+    dashscope.base_websocket_api_url = ws_base
+
+    collector = _CosyVoiceCollector()
+    synthesizer = CosySpeechSynthesizer(
+        model=model,
+        voice=voice,
+        format=audio_format,
+        callback=collector,
+        speech_rate=speech_rate,
+        pitch_rate=pitch_rate,
+    )
+    # 单向流式：一次 call 提交全文，音频经 callback.on_data 回调返回
+    result = None
+    try:
+        result = synthesizer.call(text_to_synth)
+    except Exception as e:
+        # call() 常在服务端 task-failed 后再抛 Connection is already closed，优先返回回调错误
+        if collector.error:
+            raise RuntimeError(
+                f"TTS 错误: {_format_qwen_audio_tts_error(str(collector.error))}"
+            ) from e
+        raise RuntimeError(f"TTS 错误: {_format_qwen_audio_tts_error(str(e))}") from e
+
+    if not collector.wait(timeout=120):
+        raise TimeoutError("Qwen-Audio TTS 超时")
+    if collector.error:
+        raise RuntimeError(
+            f"TTS 错误: {_format_qwen_audio_tts_error(str(collector.error))}"
+        )
+
+    pcm = collector.pcm_bytes()
+    if not pcm and isinstance(result, (bytes, bytearray)):
+        pcm = bytes(result)
+    if not pcm:
+        raise RuntimeError("TTS 未返回音频数据")
+    return _pcm_to_wav(pcm, sample_rate)
+
+
 def get_headers():
     return {
         "Authorization": f"Bearer {API_KEY}",
@@ -409,6 +495,7 @@ async def cosyvoice_list_voices():
         raise HTTPException(status_code=500, detail=f"API 错误: {resp.text}")
     data = resp.json()
     voice_list = data.get("output", {}).get("voice_list", [])
+    voice_list = [v for v in voice_list if str(v.get("voice_id", "")).startswith("cosyvoice")]
     voice_list.sort(key=lambda v: v.get("gmt_modified", ""), reverse=True)
     return {"voices": voice_list}
 
@@ -537,6 +624,174 @@ async def cosyvoice_tts(req: CosyTTSRequest):
         loop = asyncio.get_event_loop()
         wav_data = await loop.run_in_executor(
             None, _run_cosyvoice_tts, req.text, req.voice, req.model, req.sample_rate, req.mode, req.speech_rate, req.pitch_rate
+        )
+    except TimeoutError as e:
+        raise HTTPException(status_code=504, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS 合成失败: {e}")
+    return Response(content=wav_data, media_type="audio/wav")
+
+
+# ===== Qwen-Audio Routes =====
+
+_QWEN_AUDIO_MODELS = (
+    "qwen-audio-3.0-tts-flash",
+    "qwen-audio-3.0-tts-plus",
+)
+
+
+def _enrich_qwen_audio_voice(v: dict) -> dict:
+    """从 voice_id 解析 display_name / target_model（格式: {model}-{prefix}-{uuid}）。"""
+    voice_id = str(v.get("voice_id", ""))
+    item = dict(v)
+    for model in _QWEN_AUDIO_MODELS:
+        prefix = model + "-"
+        if not voice_id.startswith(prefix):
+            continue
+        rest = voice_id[len(prefix):]
+        name, _, _uid = rest.rpartition("-")
+        item["target_model"] = model
+        if name:
+            item["display_name"] = name
+        break
+    else:
+        item.setdefault("target_model", "qwen-audio-3.0-tts-flash")
+    return item
+
+
+@app.get("/qwen-audio", dependencies=[Depends(_verify_basic)])
+async def qwen_audio_index():
+    return FileResponse("static/qwen-audio-clone.html")
+
+
+@app.get("/api/qwen-audio/voices")
+async def qwen_audio_list_voices():
+    payload = {
+        "model": "voice-enrollment",
+        "input": {"action": "list_voice", "page_size": 1000, "page_index": 0},
+    }
+    resp = requests.post(COSYVOICE_CUSTOMIZATION_URL, json=payload, headers=get_headers())
+    if resp.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"API 错误: {resp.text}")
+    data = resp.json()
+    voice_list = data.get("output", {}).get("voice_list", [])
+    voice_list = [
+        _enrich_qwen_audio_voice(v)
+        for v in voice_list
+        if str(v.get("voice_id", "")).startswith("qwen-audio")
+    ]
+    voice_list.sort(key=lambda v: v.get("gmt_modified", ""), reverse=True)
+    return {"voices": voice_list}
+
+
+class QwenAudioCreateVoiceRequest(BaseModel):
+    voice_name: str
+    audio_data: str  # base64 data URI: "data:audio/wav;base64,..."
+    target_model: str = "qwen-audio-3.0-tts-flash"
+    language_hints: list[str] | None = None
+
+
+@app.post("/api/qwen-audio/voices")
+async def qwen_audio_create_voice(req: QwenAudioCreateVoiceRequest):
+    if not re.match(r"^[a-z0-9]{1,10}$", req.voice_name):
+        raise HTTPException(
+            status_code=400, detail="音色名称只能包含小写字母和数字，最多 10 个字符")
+
+    try:
+        header, b64 = req.audio_data.split(",", 1)
+        audio_bytes = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="音频数据格式错误")
+
+    tmp_filename = f"{req.voice_name}_{int(time.time())}.wav"
+    tmp_path = UPLOAD_DIR / tmp_filename
+    tmp_path.write_bytes(audio_bytes)
+
+    try:
+        public_url = rustfs_upload(str(tmp_path))
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"上传到公网失败: {e}")
+
+    dashscope.base_http_api_url = COSYVOICE_HTTP_URL
+    dashscope.base_websocket_api_url = COSYVOICE_WS_URL
+
+    service = VoiceEnrollmentService()
+    create_kwargs = {
+        "target_model": req.target_model,
+        "prefix": req.voice_name,
+        "url": public_url,
+    }
+    if req.language_hints:
+        create_kwargs["language_hints"] = req.language_hints
+    try:
+        voice_id = service.create_voice(**create_kwargs)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建音色失败: {e}")
+
+    status = "DEPLOYING"
+    for _ in range(12):
+        await asyncio.sleep(5)
+        try:
+            info = service.query_voice(voice_id=voice_id)
+            status = info.get("status", "DEPLOYING")
+            if status in ("OK", "UNDEPLOYED"):
+                break
+        except Exception:
+            pass
+
+    return {"voice_id": voice_id, "status": status}
+
+
+@app.get("/api/qwen-audio/voices/{voice_id:path}/status")
+async def qwen_audio_voice_status(voice_id: str):
+    dashscope.base_http_api_url = COSYVOICE_HTTP_URL
+    service = VoiceEnrollmentService()
+    try:
+        info = service.query_voice(voice_id=voice_id)
+        status = info.get("status", "DEPLOYING")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"voice_id": voice_id, "status": status}
+
+
+@app.delete("/api/qwen-audio/voices/{voice_id:path}")
+async def qwen_audio_delete_voice(voice_id: str):
+    payload = {
+        "model": "voice-enrollment",
+        "input": {"action": "delete_voice", "voice_id": voice_id},
+    }
+    resp = requests.post(COSYVOICE_CUSTOMIZATION_URL,
+                         json=payload, headers=get_headers())
+    if resp.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"删除音色失败: {resp.text}")
+    return resp.json()
+
+
+class QwenAudioTTSRequest(BaseModel):
+    text: str
+    voice: str
+    model: str = "qwen-audio-3.0-tts-flash"
+    sample_rate: int = 8000
+    mode: str = "line"
+    speech_rate: float = 1.0
+    pitch_rate: float = 1.0
+
+
+@app.post("/api/qwen-audio/tts")
+async def qwen_audio_tts(req: QwenAudioTTSRequest):
+    try:
+        loop = asyncio.get_event_loop()
+        wav_data = await loop.run_in_executor(
+            None,
+            _run_qwen_audio_tts,
+            req.text,
+            req.voice,
+            req.model,
+            req.sample_rate,
+            req.mode,
+            req.speech_rate,
+            req.pitch_rate,
         )
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
