@@ -414,6 +414,17 @@
     align-items: center;
     gap: 5px;
   }
+
+  .latency-badge {
+    font-size: 12px;
+    font-weight: 600;
+    color: #4338ca;
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 999px;
+    padding: 3px 10px;
+    white-space: nowrap;
+  }
   .dot-anim { animation: blink 1.2s step-start infinite; }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
 
@@ -458,9 +469,12 @@
   <div class="panel">
     <div class="panel-header">
       <h2>TTS 播放</h2>
-      <div id="tts-status" class="loading-badge" style="display:none">
-        <div class="spinner" style="border-color:rgba(79,70,229,.3);border-top-color:#4f46e5"></div>
-        <span>合成中<span class="dot-anim">…</span></span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div id="tts-latency" class="latency-badge" style="display:none"></div>
+        <div id="tts-status" class="loading-badge" style="display:none">
+          <div class="spinner" style="border-color:rgba(79,70,229,.3);border-top-color:#4f46e5"></div>
+          <span>合成中<span class="dot-anim">…</span></span>
+        </div>
       </div>
     </div>
     <div class="panel-body">
@@ -870,6 +884,16 @@ async function playTTSRequest(text, voice, model, sampleRate, mode, speechRate, 
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }));
     throw new Error(err.detail || resp.statusText);
+  }
+  const delayMs = resp.headers.get('X-First-Package-Delay-Ms');
+  const latencyEl = document.getElementById('tts-latency');
+  if (latencyEl) {
+    if (delayMs != null && delayMs !== '') {
+      latencyEl.textContent = `首包延迟 ${delayMs} ms`;
+      latencyEl.style.display = 'inline-flex';
+    } else {
+      latencyEl.style.display = 'none';
+    }
   }
   const blob = await resp.blob();
   setVoiceAudioCache(voice, blob);

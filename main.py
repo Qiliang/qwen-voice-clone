@@ -159,7 +159,13 @@ def _run_cosyvoice_tts(text: str, voice: str, model: str, sample_rate: int, mode
 
     src_pcm = collector.pcm_bytes()
 
-    return _pcm_to_wav(src_pcm, sample_rate)
+    first_delay_ms = None
+    try:
+        first_delay_ms = synthesizer.get_first_package_delay()
+    except Exception:
+        pass
+    print(f"first_delay_ms: {first_delay_ms}")
+    return _pcm_to_wav(src_pcm, sample_rate), first_delay_ms
 
 
 def _qwen_audio_api_bases() -> tuple[str, str]:
@@ -190,14 +196,13 @@ def _run_qwen_audio_tts(
     mode: str = "line",
     speech_rate: float = 1.0,
     pitch_rate: float = 1.0,
-) -> bytes:
-    """Qwen-Audio 单向流式 TTS：按指定采样率输出 PCM，再封装为 WAV。"""
+) -> tuple[bytes, float | None]:
+    """Qwen-Audio 双向流式 TTS：streaming_call 推流，按采样率输出 PCM 再封装为 WAV。"""
     if mode == "line":
-        text_to_synth = "\n".join(ln for ln in text.split("\n") if ln.strip())
+        chunks = [ln for ln in text.split("\n") if ln.strip()]
     else:
-        # 单向流式不支持逐字推流，整段一次提交
-        text_to_synth = text.strip()
-    if not text_to_synth:
+        chunks = list(text)
+    if not chunks:
         raise ValueError("文本内容为空")
 
     if sample_rate == 16000:
@@ -221,12 +226,12 @@ def _run_qwen_audio_tts(
         speech_rate=speech_rate,
         pitch_rate=pitch_rate,
     )
-    # 单向流式：一次 call 提交全文，音频经 callback.on_data 回调返回
-    result = None
     try:
-        result = synthesizer.call(text_to_synth)
+        # 双向流式：逐段 streaming_call，最后 streaming_complete
+        for chunk in chunks:
+            synthesizer.streaming_call(chunk)
+        synthesizer.streaming_complete()
     except Exception as e:
-        # call() 常在服务端 task-failed 后再抛 Connection is already closed，优先返回回调错误
         if collector.error:
             raise RuntimeError(
                 f"TTS 错误: {_format_qwen_audio_tts_error(str(collector.error))}"
@@ -241,11 +246,15 @@ def _run_qwen_audio_tts(
         )
 
     pcm = collector.pcm_bytes()
-    if not pcm and isinstance(result, (bytes, bytearray)):
-        pcm = bytes(result)
     if not pcm:
         raise RuntimeError("TTS 未返回音频数据")
-    return _pcm_to_wav(pcm, sample_rate)
+
+    first_delay_ms = None
+    try:
+        first_delay_ms = synthesizer.get_first_package_delay()
+    except Exception:
+        pass
+    return _pcm_to_wav(pcm, sample_rate), first_delay_ms
 
 
 def get_headers():
@@ -343,7 +352,13 @@ def _run_tts_ws(text: str, voice: str, model: str, sample_rate: int, mode: str =
             resampled_int16 = np.clip(
                 resampled * 32768.0, -32768, 32767).astype(np.int16)
             pcm = resampled_int16.tobytes()
-    return _pcm_to_wav(pcm, sample_rate)
+
+    first_delay_ms = None
+    try:
+        first_delay_ms = client.get_first_audio_delay()
+    except Exception:
+        pass
+    return _pcm_to_wav(pcm, sample_rate), first_delay_ms
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -425,14 +440,17 @@ class TTSRequest(BaseModel):
 async def tts(req: TTSRequest):
     try:
         loop = asyncio.get_event_loop()
-        wav_data = await loop.run_in_executor(
+        wav_data, first_delay_ms = await loop.run_in_executor(
             None, _run_tts_ws, req.text, req.voice, req.model, req.sample_rate, req.mode, req.speech_rate, req.pitch_rate
         )
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"TTS 合成失败: {e}")
-    return Response(content=wav_data, media_type="audio/wav")
+    headers = {}
+    if first_delay_ms is not None:
+        headers["X-First-Package-Delay-Ms"] = str(first_delay_ms)
+    return Response(content=wav_data, media_type="audio/wav", headers=headers)
 
 
 @app.post("/api/upload")
@@ -622,14 +640,17 @@ class CosyTTSRequest(BaseModel):
 async def cosyvoice_tts(req: CosyTTSRequest):
     try:
         loop = asyncio.get_event_loop()
-        wav_data = await loop.run_in_executor(
+        wav_data, first_delay_ms = await loop.run_in_executor(
             None, _run_cosyvoice_tts, req.text, req.voice, req.model, req.sample_rate, req.mode, req.speech_rate, req.pitch_rate
         )
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"TTS 合成失败: {e}")
-    return Response(content=wav_data, media_type="audio/wav")
+    headers = {}
+    if first_delay_ms is not None:
+        headers["X-First-Package-Delay-Ms"] = str(first_delay_ms)
+    return Response(content=wav_data, media_type="audio/wav", headers=headers)
 
 
 # ===== Qwen-Audio Routes =====
@@ -782,7 +803,7 @@ class QwenAudioTTSRequest(BaseModel):
 async def qwen_audio_tts(req: QwenAudioTTSRequest):
     try:
         loop = asyncio.get_event_loop()
-        wav_data = await loop.run_in_executor(
+        wav_data, first_delay_ms = await loop.run_in_executor(
             None,
             _run_qwen_audio_tts,
             req.text,
@@ -797,7 +818,10 @@ async def qwen_audio_tts(req: QwenAudioTTSRequest):
         raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"TTS 合成失败: {e}")
-    return Response(content=wav_data, media_type="audio/wav")
+    headers = {}
+    if first_delay_ms is not None:
+        headers["X-First-Package-Delay-Ms"] = str(first_delay_ms)
+    return Response(content=wav_data, media_type="audio/wav", headers=headers)
 
 
 # ===== MiniMax Routes =====
