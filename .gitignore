@@ -42,4 +42,6 @@ extracts/
 cookies.txt
 pretrained_models/
 uploads/
+voice_name_meta.json
+cosyvoice_registry.json
 

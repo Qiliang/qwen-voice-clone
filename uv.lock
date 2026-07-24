@@ -2865,7 +2865,7 @@ wheels = [
 
 [[package]]
 name = "voice-clone"
-version = "0.4.0"
+version = "0.4.2"
 source = { virtual = "." }
 dependencies = [
     { name = "boto3" },

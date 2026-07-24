@@ -2,9 +2,11 @@ import asyncio
 import base64
 import io
 import json
+import logging
 import os
 import re
 import time
+import traceback
 import numpy as np
 import pathlib
 import secrets
@@ -34,8 +36,79 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from rustfs import upload_file as rustfs_upload
 import voice_extract
+from encode import codec as cn_codec
 
 app = FastAPI(title="Qwen Voice Clone")
+logger = logging.getLogger("qwen-voice-clone")
+
+# voice_id → {"encoded": str, "char_count": int}，列表时用 char_count 解码展示中文名
+VOICE_NAME_META_FILE = pathlib.Path("voice_name_meta.json")
+
+
+def _load_voice_name_meta() -> dict:
+    if VOICE_NAME_META_FILE.exists():
+        try:
+            return json.loads(VOICE_NAME_META_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_voice_name_meta(meta: dict) -> None:
+    VOICE_NAME_META_FILE.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _remember_voice_name(
+    voice_id: str, encoded: str, char_count: int, display_name: str
+) -> None:
+    meta = _load_voice_name_meta()
+    meta[voice_id] = {
+        "encoded": encoded,
+        "char_count": char_count,
+        "display_name": display_name,
+    }
+    _save_voice_name_meta(meta)
+
+
+def _forget_voice_name(voice_id: str) -> None:
+    meta = _load_voice_name_meta()
+    if voice_id in meta:
+        del meta[voice_id]
+        _save_voice_name_meta(meta)
+
+
+def _encode_voice_prefix(
+    name: str, max_len: int, *, alnum_only: bool = False
+) -> tuple[str, int]:
+    """中文/数字音色名 → (API prefix/preferred_name, decode 用 char_count)。"""
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="音色名称不能为空")
+    try:
+        encoded = cn_codec.encode(name, max_len=max_len, alnum_only=alnum_only)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    plain = cn_codec.plain_for_encode(name, alnum_only=alnum_only)
+    return encoded, len(plain)
+
+
+def _decode_stored_voice_name(voice_id: str, encoded_fallback: str = "") -> str | None:
+    """优先返回创建时的 display_name；否则用 char_count 解码。"""
+    info = _load_voice_name_meta().get(voice_id)
+    if not info:
+        return None
+    display = info.get("display_name")
+    if display:
+        return str(display)
+    code = info.get("encoded") or encoded_fallback
+    char_count = info.get("char_count")
+    if not code or not isinstance(char_count, int):
+        return None
+    try:
+        return cn_codec.decode(code, char_count)
+    except ValueError:
+        return None
 
 _basic_security = HTTPBasic()
 _BASIC_USER = os.getenv("BASIC_AUTH_USER", "hollycrm")
@@ -102,6 +175,7 @@ class _CosyVoiceCollector(ResultCallback):
 
     def on_error(self, message: str) -> None:
         self.error = str(message)
+        print(f"[CosyVoiceCollector.on_error] {self.error}")
         self._done.set()
 
     def on_close(self) -> None:
@@ -232,6 +306,12 @@ def _run_qwen_audio_tts(
             synthesizer.streaming_call(chunk)
         synthesizer.streaming_complete()
     except Exception as e:
+        detail = collector.error or e
+        print(
+            f"[qwen-audio/tts] streaming 异常: model={model} voice={voice}\n"
+            f"collector.error={collector.error!r}\n"
+            f"exception={e!r}\n{traceback.format_exc()}"
+        )
         if collector.error:
             raise RuntimeError(
                 f"TTS 错误: {_format_qwen_audio_tts_error(str(collector.error))}"
@@ -239,8 +319,13 @@ def _run_qwen_audio_tts(
         raise RuntimeError(f"TTS 错误: {_format_qwen_audio_tts_error(str(e))}") from e
 
     if not collector.wait(timeout=120):
+        print(f"[qwen-audio/tts] 超时: model={model} voice={voice} collector.error={collector.error!r}")
         raise TimeoutError("Qwen-Audio TTS 超时")
     if collector.error:
+        print(
+            f"[qwen-audio/tts] collector 报错: model={model} voice={voice}\n"
+            f"error={collector.error!r}"
+        )
         raise RuntimeError(
             f"TTS 错误: {_format_qwen_audio_tts_error(str(collector.error))}"
         )
@@ -374,6 +459,12 @@ async def qwen_index():
     return FileResponse("static/qwen-voice-clone.html")
 
 
+def _extract_qwen_voice_prefix(voice_id: str) -> str:
+    # voice ID: qwen-tts-vc-{preferred_name}-voice-{timestamp}-{hash}
+    m = re.match(r"^qwen-tts-vc-(.+?)-voice-", voice_id or "")
+    return m.group(1) if m else ""
+
+
 @app.get("/api/voices")
 async def list_voices():
     payload = {
@@ -384,7 +475,16 @@ async def list_voices():
                          headers=get_headers())
     if resp.status_code != 200:
         raise HTTPException(status_code=500, detail=f"API 错误: {resp.text}")
-    return resp.json()
+    data = resp.json()
+    for v in data.get("output", {}).get("voice_list", []) or []:
+        voice_id = str(v.get("voice") or "")
+        enc = v.get("preferred_name") or _extract_qwen_voice_prefix(voice_id)
+        decoded = _decode_stored_voice_name(voice_id, encoded_fallback=str(enc or ""))
+        if decoded:
+            v["preferred_name"] = decoded
+            v["display_name"] = decoded
+            v["prefix_encoded"] = enc
+    return data
 
 
 class CreateVoiceRequest(BaseModel):
@@ -395,12 +495,17 @@ class CreateVoiceRequest(BaseModel):
 
 @app.post("/api/voices")
 async def create_voice(req: CreateVoiceRequest):
+    # preferred_name：仅允许数字/字母/下划线，最长 16 → 中文名先编码
+    display_name = req.preferred_name.strip()
+    encoded, char_count = _encode_voice_prefix(display_name, max_len=16)
+    if not re.match(r"^[A-Za-z0-9_]{1,16}$", encoded):
+        raise HTTPException(status_code=400, detail="编码后的 preferred_name 非法")
     payload = {
         "model": "qwen-voice-enrollment",
         "input": {
             "action": "create",
             "target_model": req.target_model,
-            "preferred_name": req.preferred_name,
+            "preferred_name": encoded,
             "audio": {"data": req.audio_data},
 
         },
@@ -409,7 +514,16 @@ async def create_voice(req: CreateVoiceRequest):
                          headers=get_headers())
     if resp.status_code != 200:
         raise HTTPException(status_code=500, detail=f"创建音色失败: {resp.text}")
-    return resp.json()
+    data = resp.json()
+    voice_id = (data.get("output") or {}).get("voice")
+    if voice_id:
+        _remember_voice_name(
+            voice_id,
+            encoded=encoded,
+            char_count=char_count,
+            display_name=display_name,
+        )
+    return data
 
 
 @app.delete("/api/voices/{voice_id}")
@@ -422,6 +536,7 @@ async def delete_voice(voice_id: str):
                          headers=get_headers())
     if resp.status_code != 200:
         raise HTTPException(status_code=500, detail=f"删除音色失败: {resp.text}")
+    _forget_voice_name(voice_id)
     return resp.json()
 
 
@@ -665,6 +780,7 @@ def _enrich_qwen_audio_voice(v: dict) -> dict:
     """从 voice_id 解析 display_name / target_model（格式: {model}-{prefix}-{uuid}）。"""
     voice_id = str(v.get("voice_id", ""))
     item = dict(v)
+    encoded_prefix = ""
     for model in _QWEN_AUDIO_MODELS:
         prefix = model + "-"
         if not voice_id.startswith(prefix):
@@ -672,11 +788,16 @@ def _enrich_qwen_audio_voice(v: dict) -> dict:
         rest = voice_id[len(prefix):]
         name, _, _uid = rest.rpartition("-")
         item["target_model"] = model
+        encoded_prefix = name
         if name:
             item["display_name"] = name
+            item["prefix_encoded"] = name
         break
     else:
         item.setdefault("target_model", "qwen-audio-3.0-tts-flash")
+    decoded = _decode_stored_voice_name(voice_id, encoded_fallback=encoded_prefix)
+    if decoded:
+        item["display_name"] = decoded
     return item
 
 
@@ -714,9 +835,10 @@ class QwenAudioCreateVoiceRequest(BaseModel):
 
 @app.post("/api/qwen-audio/voices")
 async def qwen_audio_create_voice(req: QwenAudioCreateVoiceRequest):
-    if not re.match(r"^[a-z0-9]{1,10}$", req.voice_name):
-        raise HTTPException(
-            status_code=400, detail="音色名称只能包含小写字母和数字，最多 10 个字符")
+    # prefix：仅允许数字和英文字母，最长 10 → 中文名先编码（_ 后缀折叠，不出现在 prefix）
+    display_name = req.voice_name.strip()
+    encoded, char_count = _encode_voice_prefix(
+        display_name, max_len=10, alnum_only=True)
 
     try:
         header, b64 = req.audio_data.split(",", 1)
@@ -724,7 +846,7 @@ async def qwen_audio_create_voice(req: QwenAudioCreateVoiceRequest):
     except Exception:
         raise HTTPException(status_code=400, detail="音频数据格式错误")
 
-    tmp_filename = f"{req.voice_name}_{int(time.time())}.wav"
+    tmp_filename = f"{encoded}_{int(time.time())}.wav"
     tmp_path = UPLOAD_DIR / tmp_filename
     tmp_path.write_bytes(audio_bytes)
 
@@ -740,7 +862,7 @@ async def qwen_audio_create_voice(req: QwenAudioCreateVoiceRequest):
     service = VoiceEnrollmentService()
     create_kwargs = {
         "target_model": req.target_model,
-        "prefix": req.voice_name,
+        "prefix": encoded,
         "url": public_url,
     }
     if req.language_hints:
@@ -749,6 +871,13 @@ async def qwen_audio_create_voice(req: QwenAudioCreateVoiceRequest):
         voice_id = service.create_voice(**create_kwargs)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建音色失败: {e}")
+
+    _remember_voice_name(
+        voice_id,
+        encoded=encoded,
+        char_count=char_count,
+        display_name=display_name,
+    )
 
     status = "DEPLOYING"
     for _ in range(12):
@@ -761,7 +890,7 @@ async def qwen_audio_create_voice(req: QwenAudioCreateVoiceRequest):
         except Exception:
             pass
 
-    return {"voice_id": voice_id, "status": status}
+    return {"voice_id": voice_id, "status": status, "display_name": display_name}
 
 
 @app.get("/api/qwen-audio/voices/{voice_id:path}/status")
@@ -786,6 +915,7 @@ async def qwen_audio_delete_voice(voice_id: str):
                          json=payload, headers=get_headers())
     if resp.status_code != 200:
         raise HTTPException(status_code=500, detail=f"删除音色失败: {resp.text}")
+    _forget_voice_name(voice_id)
     return resp.json()
 
 
@@ -815,8 +945,22 @@ async def qwen_audio_tts(req: QwenAudioTTSRequest):
             req.pitch_rate,
         )
     except TimeoutError as e:
+        logger.exception(
+            "Qwen-Audio TTS 超时: model=%s voice=%s sample_rate=%s mode=%s",
+            req.model, req.voice, req.sample_rate, req.mode,
+        )
+        print(f"[qwen-audio/tts] TimeoutError: {e!r}\n{traceback.format_exc()}")
         raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:
+        logger.exception(
+            "Qwen-Audio TTS 失败: model=%s voice=%s sample_rate=%s mode=%s err=%s",
+            req.model, req.voice, req.sample_rate, req.mode, e,
+        )
+        print(
+            f"[qwen-audio/tts] ERROR model={req.model} voice={req.voice} "
+            f"sample_rate={req.sample_rate} mode={req.mode}\n"
+            f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
+        )
         raise HTTPException(status_code=500, detail=f"TTS 合成失败: {e}")
     headers = {}
     if first_delay_ms is not None:

@@ -587,9 +587,9 @@
       </div>
 
       <div class="form-group">
-        <label>音色名称（仅限英文、数字和下划线）</label>
-        <input type="text" id="voice-name" placeholder="例如：my_custom_voice" pattern="[a-zA-Z0-9_]+" maxlength="50" value="malisu">
-        <div class="form-hint">建议 10~20 秒的清晰人声音频，支持 WAV / MP3 / M4A</div>
+        <label>音色名称（支持中文，将自动编码为 preferred_name）</label>
+        <input type="text" id="voice-name" placeholder="例如：温柔小姐姐" maxlength="16" value="温柔小姐姐">
+        <div class="form-hint">常用汉字/数字，编码后不超过 16 字符；建议 10~20 秒清晰人声，WAV / MP3 / M4A</div>
       </div>
 
       <div class="form-group">
@@ -1268,21 +1268,20 @@ function getPreviewProgress() {
 
 // ===== Create Voice =====
 function checkCreateReady() {
-  const nameOk = /^[a-zA-Z0-9_]+$/.test(document.getElementById('voice-name').value);
+  const nameOk = document.getElementById('voice-name').value.trim().length > 0;
   const audioOk = !!audioBuffer;
   document.getElementById('btn-create').disabled = !(nameOk && audioOk);
 }
 
 document.getElementById('voice-name').addEventListener('input', function () {
-  const ok = /^[a-zA-Z0-9_]*$/.test(this.value);
-  this.classList.toggle('invalid', !ok && this.value.length > 0);
+  this.classList.toggle('invalid', this.value.trim().length === 0 && this.value.length > 0);
   checkCreateReady();
 });
 
 async function createVoice() {
   const name = document.getElementById('voice-name').value.trim();
-  if (!/^[a-zA-Z0-9_]+$/.test(name)) {
-    toast('音色名称只能包含英文、数字和下划线', 'error');
+  if (!name) {
+    toast('请填写音色名称', 'error');
     return;
   }
   if (!audioBuffer) {
