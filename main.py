@@ -7,6 +7,7 @@ import os
 import re
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pathlib
 import secrets
@@ -41,74 +42,66 @@ from encode import codec as cn_codec
 app = FastAPI(title="Qwen Voice Clone")
 logger = logging.getLogger("qwen-voice-clone")
 
-# voice_id → {"encoded": str, "char_count": int}，列表时用 char_count 解码展示中文名
-VOICE_NAME_META_FILE = pathlib.Path("voice_name_meta.json")
-
-
-def _load_voice_name_meta() -> dict:
-    if VOICE_NAME_META_FILE.exists():
-        try:
-            return json.loads(VOICE_NAME_META_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {}
-
-
-def _save_voice_name_meta(meta: dict) -> None:
-    VOICE_NAME_META_FILE.write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _remember_voice_name(
-    voice_id: str, encoded: str, char_count: int, display_name: str
-) -> None:
-    meta = _load_voice_name_meta()
-    meta[voice_id] = {
-        "encoded": encoded,
-        "char_count": char_count,
-        "display_name": display_name,
-    }
-    _save_voice_name_meta(meta)
-
-
-def _forget_voice_name(voice_id: str) -> None:
-    meta = _load_voice_name_meta()
-    if voice_id in meta:
-        del meta[voice_id]
-        _save_voice_name_meta(meta)
-
 
 def _encode_voice_prefix(
     name: str, max_len: int, *, alnum_only: bool = False
-) -> tuple[str, int]:
-    """中文/数字音色名 → (API prefix/preferred_name, decode 用 char_count)。"""
+) -> str:
+    """中文/数字音色名 → API prefix / preferred_name。"""
     name = (name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="音色名称不能为空")
     try:
-        encoded = cn_codec.encode(name, max_len=max_len, alnum_only=alnum_only)
+        return cn_codec.encode(name, max_len=max_len, alnum_only=alnum_only)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    plain = cn_codec.plain_for_encode(name, alnum_only=alnum_only)
-    return encoded, len(plain)
 
 
-def _decode_stored_voice_name(voice_id: str, encoded_fallback: str = "") -> str | None:
-    """优先返回创建时的 display_name；否则用 char_count 解码。"""
-    info = _load_voice_name_meta().get(voice_id)
-    if not info:
-        return None
-    display = info.get("display_name")
-    if display:
-        return str(display)
-    code = info.get("encoded") or encoded_fallback
-    char_count = info.get("char_count")
-    if not code or not isinstance(char_count, int):
+def _cased_prefix_from_resource_link(
+    resource_link: str, voice_id: str, fallback: str
+) -> str:
+    """resource_link 路径中仍保留原始大小写的 prefix（API 的 voice_id 会强制小写）。"""
+    if not resource_link or not voice_id or not fallback:
+        return fallback
+    marker = f"/{voice_id}"
+    idx = resource_link.find(marker)
+    if idx <= 0:
+        return fallback
+    part = resource_link[:idx].rsplit("/", 1)[-1]
+    if part and part.lower() == fallback.lower():
+        return part
+    return fallback
+
+
+def _restore_underscore_tail(text: str, encoded_prefix: str) -> str:
+    """alnum_only 编码会折叠 ``南枝_0`` → ``南枝0``；展示时若往返一致则还原 ``_``。"""
+    if not text or "_" in text:
+        return text
+    match = re.fullmatch(r"^(.*[^\d])(\d+)$", text)
+    if not match:
+        return text
+    candidate = f"{match.group(1)}_{match.group(2)}"
+    try:
+        limit = max(len(encoded_prefix), 16)
+        if cn_codec.encode(candidate, max_len=limit, alnum_only=True) == encoded_prefix:
+            return candidate
+    except ValueError:
+        pass
+    return text
+
+
+def _decode_voice_name(encoded: str) -> str | None:
+    """将编码后的 prefix/preferred_name 还原为中文名。
+
+    仅当含大写字母时解码：CnNameCodec 区分大小写，voice_id 会被 API 强制小写；
+    全小写历史拼音 prefix 保持原样，避免短码碰撞出错误汉字。
+    """
+    if not encoded or not any(c.isupper() for c in encoded):
         return None
     try:
-        return cn_codec.decode(code, char_count)
+        text = cn_codec.decode_auto(encoded)
     except ValueError:
         return None
+    return _restore_underscore_tail(text, encoded)
 
 _basic_security = HTTPBasic()
 _BASIC_USER = os.getenv("BASIC_AUTH_USER", "hollycrm")
@@ -479,7 +472,8 @@ async def list_voices():
     for v in data.get("output", {}).get("voice_list", []) or []:
         voice_id = str(v.get("voice") or "")
         enc = v.get("preferred_name") or _extract_qwen_voice_prefix(voice_id)
-        decoded = _decode_stored_voice_name(voice_id, encoded_fallback=str(enc or ""))
+        enc = str(enc or "")
+        decoded = _decode_voice_name(enc)
         if decoded:
             v["preferred_name"] = decoded
             v["display_name"] = decoded
@@ -497,7 +491,7 @@ class CreateVoiceRequest(BaseModel):
 async def create_voice(req: CreateVoiceRequest):
     # preferred_name：仅允许数字/字母/下划线，最长 16 → 中文名先编码
     display_name = req.preferred_name.strip()
-    encoded, char_count = _encode_voice_prefix(display_name, max_len=16)
+    encoded = _encode_voice_prefix(display_name, max_len=16)
     if not re.match(r"^[A-Za-z0-9_]{1,16}$", encoded):
         raise HTTPException(status_code=400, detail="编码后的 preferred_name 非法")
     payload = {
@@ -514,16 +508,7 @@ async def create_voice(req: CreateVoiceRequest):
                          headers=get_headers())
     if resp.status_code != 200:
         raise HTTPException(status_code=500, detail=f"创建音色失败: {resp.text}")
-    data = resp.json()
-    voice_id = (data.get("output") or {}).get("voice")
-    if voice_id:
-        _remember_voice_name(
-            voice_id,
-            encoded=encoded,
-            char_count=char_count,
-            display_name=display_name,
-        )
-    return data
+    return resp.json()
 
 
 @app.delete("/api/voices/{voice_id}")
@@ -536,7 +521,6 @@ async def delete_voice(voice_id: str):
                          headers=get_headers())
     if resp.status_code != 200:
         raise HTTPException(status_code=500, detail=f"删除音色失败: {resp.text}")
-    _forget_voice_name(voice_id)
     return resp.json()
 
 
@@ -776,28 +760,56 @@ _QWEN_AUDIO_MODELS = (
 )
 
 
+def _extract_qwen_audio_prefix(voice_id: str) -> tuple[str, str]:
+    """从 voice_id 解析 (target_model, prefix)。解析失败返回 ('', '')。"""
+    for model in _QWEN_AUDIO_MODELS:
+        model_prefix = model + "-"
+        if not voice_id.startswith(model_prefix):
+            continue
+        rest = voice_id[len(model_prefix):]
+        name, _, _uid = rest.rpartition("-")
+        return model, name
+    return "", ""
+
+
+def _query_qwen_audio_resource_link(voice_id: str) -> str:
+    """查询单个音色以拿到含原始大小写 prefix 的 resource_link。"""
+    try:
+        payload = {
+            "model": "voice-enrollment",
+            "input": {"action": "query_voice", "voice_id": voice_id},
+        }
+        resp = requests.post(
+            COSYVOICE_CUSTOMIZATION_URL, json=payload, headers=get_headers(), timeout=15
+        )
+        if resp.status_code != 200:
+            return ""
+        return str(resp.json().get("output", {}).get("resource_link") or "")
+    except Exception:
+        return ""
+
+
 def _enrich_qwen_audio_voice(v: dict) -> dict:
-    """从 voice_id 解析 display_name / target_model（格式: {model}-{prefix}-{uuid}）。"""
+    """从 voice_id 解析 display_name / target_model（格式: {model}-{prefix}-{uuid}）。
+
+    prefix 经 CnNameCodec 编码；尽量用 resource_link 中的原始大小写再解码。
+    """
     voice_id = str(v.get("voice_id", ""))
     item = dict(v)
-    encoded_prefix = ""
-    for model in _QWEN_AUDIO_MODELS:
-        prefix = model + "-"
-        if not voice_id.startswith(prefix):
-            continue
-        rest = voice_id[len(prefix):]
-        name, _, _uid = rest.rpartition("-")
+    model, prefix = _extract_qwen_audio_prefix(voice_id)
+    if model:
         item["target_model"] = model
-        encoded_prefix = name
-        if name:
-            item["display_name"] = name
-            item["prefix_encoded"] = name
-        break
     else:
         item.setdefault("target_model", "qwen-audio-3.0-tts-flash")
-    decoded = _decode_stored_voice_name(voice_id, encoded_fallback=encoded_prefix)
-    if decoded:
-        item["display_name"] = decoded
+
+    if prefix:
+        cased = _cased_prefix_from_resource_link(
+            str(item.get("resource_link") or ""),
+            voice_id,
+            prefix,
+        )
+        item["prefix_encoded"] = cased
+        item["display_name"] = _decode_voice_name(cased) or cased
     return item
 
 
@@ -816,12 +828,25 @@ async def qwen_audio_list_voices():
     if resp.status_code != 200:
         raise HTTPException(status_code=500, detail=f"API 错误: {resp.text}")
     data = resp.json()
-    voice_list = data.get("output", {}).get("voice_list", [])
-    voice_list = [
-        _enrich_qwen_audio_voice(v)
-        for v in voice_list
+    raw_list = [
+        v for v in data.get("output", {}).get("voice_list", []) or []
         if str(v.get("voice_id", "")).startswith("qwen-audio")
     ]
+
+    # list 不含 resource_link；补查以恢复 prefix 大小写后再解码
+    def _enrich_all() -> list[dict]:
+        def _with_link(v: dict) -> dict:
+            voice_id = str(v.get("voice_id", ""))
+            link = _query_qwen_audio_resource_link(voice_id)
+            if link:
+                v = {**v, "resource_link": link}
+            return _enrich_qwen_audio_voice(v)
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            return list(pool.map(_with_link, raw_list))
+
+    loop = asyncio.get_event_loop()
+    voice_list = await loop.run_in_executor(None, _enrich_all)
     voice_list.sort(key=lambda v: v.get("gmt_modified", ""), reverse=True)
     return {"voices": voice_list}
 
@@ -837,8 +862,7 @@ class QwenAudioCreateVoiceRequest(BaseModel):
 async def qwen_audio_create_voice(req: QwenAudioCreateVoiceRequest):
     # prefix：仅允许数字和英文字母，最长 10 → 中文名先编码（_ 后缀折叠，不出现在 prefix）
     display_name = req.voice_name.strip()
-    encoded, char_count = _encode_voice_prefix(
-        display_name, max_len=10, alnum_only=True)
+    encoded = _encode_voice_prefix(display_name, max_len=10, alnum_only=True)
 
     try:
         header, b64 = req.audio_data.split(",", 1)
@@ -871,13 +895,6 @@ async def qwen_audio_create_voice(req: QwenAudioCreateVoiceRequest):
         voice_id = service.create_voice(**create_kwargs)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建音色失败: {e}")
-
-    _remember_voice_name(
-        voice_id,
-        encoded=encoded,
-        char_count=char_count,
-        display_name=display_name,
-    )
 
     status = "DEPLOYING"
     for _ in range(12):
@@ -915,7 +932,6 @@ async def qwen_audio_delete_voice(voice_id: str):
                          json=payload, headers=get_headers())
     if resp.status_code != 200:
         raise HTTPException(status_code=500, detail=f"删除音色失败: {resp.text}")
-    _forget_voice_name(voice_id)
     return resp.json()
 
 
