@@ -5,7 +5,6 @@
 - 正文全小写 base36（0-9a-z），API 强制小写也不丢信息
 - qwen-audio prefix≤10 → 保证 5 字；qwen preferred_name≤16 → 保证 8 字
 
-旧方案（codec_legacy）：base62 + GB2312 一级，仅用于解码历史音色。
 """
 
 from __future__ import annotations

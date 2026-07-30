@@ -7,7 +7,6 @@ import os
 import re
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pathlib
 import secrets
@@ -38,7 +37,6 @@ from pydantic import BaseModel
 from rustfs import upload_file as rustfs_upload
 import voice_extract
 from encode import codec as cn_codec
-from encode import codec_legacy as cn_codec_legacy
 
 app = FastAPI(title="Qwen Voice Clone")
 logger = logging.getLogger("qwen-voice-clone")
@@ -56,63 +54,6 @@ def _encode_voice_prefix(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-
-def _cased_prefix_from_resource_link(
-    resource_link: str, voice_id: str, fallback: str
-) -> str:
-    """resource_link 路径中仍保留原始大小写的 prefix（API 的 voice_id 会强制小写）。"""
-    if not resource_link or not voice_id or not fallback:
-        return fallback
-    marker = f"/{voice_id}"
-    idx = resource_link.find(marker)
-    if idx <= 0:
-        return fallback
-    part = resource_link[:idx].rsplit("/", 1)[-1]
-    if part and part.lower() == fallback.lower():
-        return part
-    return fallback
-
-
-def _restore_underscore_tail(text: str, encoded_prefix: str) -> str:
-    """旧版 alnum_only 会折叠 ``南枝_0`` → ``南枝0``；展示时若往返一致则还原 ``_``。"""
-    if not text or "_" in text:
-        return text
-    match = re.fullmatch(r"^(.*[^\d])(\d+)$", text)
-    if not match:
-        return text
-    candidate = f"{match.group(1)}_{match.group(2)}"
-    try:
-        limit = max(len(encoded_prefix), 16)
-        if cn_codec_legacy.encode(
-            candidate, max_len=limit, alnum_only=True
-        ) == encoded_prefix:
-            return candidate
-    except ValueError:
-        pass
-    return text
-
-
-def _decode_voice_name(encoded: str) -> str | None:
-    """将编码后的 prefix/preferred_name 还原为中文名。
-
-    - 新编码：全小写 base36，直接解码
-    - 旧编码：含大写或字面 `_` 的 base62；尽量结合 resource_link 恢复大小写
-    """
-    if not encoded:
-        return None
-    # 旧 base62：依赖大小写；字面 `_` 后缀也只出现在旧方案
-    if any(c.isupper() for c in encoded) or "_" in encoded:
-        try:
-            text = cn_codec_legacy.decode_auto(encoded)
-        except ValueError:
-            return None
-        return _restore_underscore_tail(text, encoded)
-    if not re.fullmatch(r"[a-z0-9]+", encoded):
-        return None
-    try:
-        return cn_codec.decode_auto(encoded)
-    except ValueError:
-        return None
 
 _basic_security = HTTPBasic()
 _BASIC_USER = os.getenv("BASIC_AUTH_USER", "hollycrm")
@@ -484,7 +425,7 @@ async def list_voices():
         voice_id = str(v.get("voice") or "")
         enc = v.get("preferred_name") or _extract_qwen_voice_prefix(voice_id)
         enc = str(enc or "")
-        decoded = _decode_voice_name(enc)
+        decoded = cn_codec.decode_auto(enc)
         if decoded:
             v["preferred_name"] = decoded
             v["display_name"] = decoded
@@ -783,28 +724,8 @@ def _extract_qwen_audio_prefix(voice_id: str) -> tuple[str, str]:
     return "", ""
 
 
-def _query_qwen_audio_resource_link(voice_id: str) -> str:
-    """查询单个音色以拿到含原始大小写 prefix 的 resource_link。"""
-    try:
-        payload = {
-            "model": "voice-enrollment",
-            "input": {"action": "query_voice", "voice_id": voice_id},
-        }
-        resp = requests.post(
-            COSYVOICE_CUSTOMIZATION_URL, json=payload, headers=get_headers(), timeout=15
-        )
-        if resp.status_code != 200:
-            return ""
-        return str(resp.json().get("output", {}).get("resource_link") or "")
-    except Exception:
-        return ""
-
-
 def _enrich_qwen_audio_voice(v: dict) -> dict:
-    """从 voice_id 解析 display_name / target_model（格式: {model}-{prefix}-{uuid}）。
-
-    prefix 经 CnNameCodec 编码；尽量用 resource_link 中的原始大小写再解码。
-    """
+    """从 voice_id 解析 display_name / target_model（格式: {model}-{prefix}-{uuid}）。"""
     voice_id = str(v.get("voice_id", ""))
     item = dict(v)
     model, prefix = _extract_qwen_audio_prefix(voice_id)
@@ -814,13 +735,11 @@ def _enrich_qwen_audio_voice(v: dict) -> dict:
         item.setdefault("target_model", "qwen-audio-3.0-tts-flash")
 
     if prefix:
-        cased = _cased_prefix_from_resource_link(
-            str(item.get("resource_link") or ""),
-            voice_id,
-            prefix,
-        )
-        item["prefix_encoded"] = cased
-        item["display_name"] = _decode_voice_name(cased) or cased
+        item["prefix_encoded"] = prefix
+        try:
+            item["display_name"] = cn_codec.decode_auto(prefix)
+        except ValueError:
+            item["display_name"] = prefix
     return item
 
 
@@ -839,25 +758,11 @@ async def qwen_audio_list_voices():
     if resp.status_code != 200:
         raise HTTPException(status_code=500, detail=f"API 错误: {resp.text}")
     data = resp.json()
-    raw_list = [
-        v for v in data.get("output", {}).get("voice_list", []) or []
+    voice_list = [
+        _enrich_qwen_audio_voice(v)
+        for v in data.get("output", {}).get("voice_list", []) or []
         if str(v.get("voice_id", "")).startswith("qwen-audio")
     ]
-
-    # list 不含 resource_link；补查以恢复 prefix 大小写后再解码
-    def _enrich_all() -> list[dict]:
-        def _with_link(v: dict) -> dict:
-            voice_id = str(v.get("voice_id", ""))
-            link = _query_qwen_audio_resource_link(voice_id)
-            if link:
-                v = {**v, "resource_link": link}
-            return _enrich_qwen_audio_voice(v)
-
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            return list(pool.map(_with_link, raw_list))
-
-    loop = asyncio.get_event_loop()
-    voice_list = await loop.run_in_executor(None, _enrich_all)
     voice_list.sort(key=lambda v: v.get("gmt_modified", ""), reverse=True)
     return {"voices": voice_list}
 
