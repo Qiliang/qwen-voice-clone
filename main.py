@@ -38,6 +38,7 @@ from pydantic import BaseModel
 from rustfs import upload_file as rustfs_upload
 import voice_extract
 from encode import codec as cn_codec
+from encode import codec_legacy as cn_codec_legacy
 
 app = FastAPI(title="Qwen Voice Clone")
 logger = logging.getLogger("qwen-voice-clone")
@@ -73,7 +74,7 @@ def _cased_prefix_from_resource_link(
 
 
 def _restore_underscore_tail(text: str, encoded_prefix: str) -> str:
-    """alnum_only 编码会折叠 ``南枝_0`` → ``南枝0``；展示时若往返一致则还原 ``_``。"""
+    """旧版 alnum_only 会折叠 ``南枝_0`` → ``南枝0``；展示时若往返一致则还原 ``_``。"""
     if not text or "_" in text:
         return text
     match = re.fullmatch(r"^(.*[^\d])(\d+)$", text)
@@ -82,7 +83,9 @@ def _restore_underscore_tail(text: str, encoded_prefix: str) -> str:
     candidate = f"{match.group(1)}_{match.group(2)}"
     try:
         limit = max(len(encoded_prefix), 16)
-        if cn_codec.encode(candidate, max_len=limit, alnum_only=True) == encoded_prefix:
+        if cn_codec_legacy.encode(
+            candidate, max_len=limit, alnum_only=True
+        ) == encoded_prefix:
             return candidate
     except ValueError:
         pass
@@ -92,16 +95,24 @@ def _restore_underscore_tail(text: str, encoded_prefix: str) -> str:
 def _decode_voice_name(encoded: str) -> str | None:
     """将编码后的 prefix/preferred_name 还原为中文名。
 
-    仅当含大写字母时解码：CnNameCodec 区分大小写，voice_id 会被 API 强制小写；
-    全小写历史拼音 prefix 保持原样，避免短码碰撞出错误汉字。
+    - 新编码：全小写 base36，直接解码
+    - 旧编码：含大写或字面 `_` 的 base62；尽量结合 resource_link 恢复大小写
     """
-    if not encoded or not any(c.isupper() for c in encoded):
+    if not encoded:
+        return None
+    # 旧 base62：依赖大小写；字面 `_` 后缀也只出现在旧方案
+    if any(c.isupper() for c in encoded) or "_" in encoded:
+        try:
+            text = cn_codec_legacy.decode_auto(encoded)
+        except ValueError:
+            return None
+        return _restore_underscore_tail(text, encoded)
+    if not re.fullmatch(r"[a-z0-9]+", encoded):
         return None
     try:
-        text = cn_codec.decode_auto(encoded)
+        return cn_codec.decode_auto(encoded)
     except ValueError:
         return None
-    return _restore_underscore_tail(text, encoded)
 
 _basic_security = HTTPBasic()
 _BASIC_USER = os.getenv("BASIC_AUTH_USER", "hollycrm")

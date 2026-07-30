@@ -43,4 +43,4 @@ cookies.txt
 pretrained_models/
 uploads/
 cosyvoice_registry.json
-
+.env
