@@ -706,10 +706,44 @@ async def cosyvoice_tts(req: CosyTTSRequest):
 
 # ===== Qwen-Audio Routes =====
 
-_QWEN_AUDIO_MODELS = (
+_QWEN_AUDIO_TTS_MODELS = (
     "qwen-audio-3.0-tts-flash",
     "qwen-audio-3.0-tts-plus",
 )
+_QWEN_AUDIO_REALTIME_MODELS = (
+    "qwen-audio-3.0-realtime-flash",
+    "qwen-audio-3.0-realtime-plus",
+)
+# 长前缀优先匹配，避免误切
+_QWEN_AUDIO_MODELS = tuple(
+    sorted(
+        _QWEN_AUDIO_TTS_MODELS + _QWEN_AUDIO_REALTIME_MODELS,
+        key=len,
+        reverse=True,
+    )
+)
+_QWEN_AUDIO_REALTIME_SAMPLE_RATE = 24000
+_QWEN_AUDIO_REALTIME_PREVIEW_INSTRUCTIONS = (
+    "你是语音试听助手。请完整、自然地朗读用户给出的文本，"
+    "不要添加开场白、解释或任何额外内容，只朗读原文。"
+)
+
+
+def _is_qwen_audio_realtime_model(model: str) -> bool:
+    return bool(model) and (
+        model in _QWEN_AUDIO_REALTIME_MODELS or "realtime" in model
+    )
+
+
+def _qwen_audio_realtime_ws_url(model: str) -> str:
+    """Realtime WebSocket URL。有 Workspace ID 时走北京 MaaS 专属域名。"""
+    workspace_id = os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip()
+    if workspace_id:
+        return (
+            f"wss://{workspace_id}.cn-beijing.maas.aliyuncs.com"
+            f"/api-ws/v1/realtime?model={model}"
+        )
+    return f"wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model={model}"
 
 
 def _extract_qwen_audio_prefix(voice_id: str) -> tuple[str, str]:
@@ -733,6 +767,9 @@ def _enrich_qwen_audio_voice(v: dict) -> dict:
         item["target_model"] = model
     else:
         item.setdefault("target_model", "qwen-audio-3.0-tts-flash")
+    item["kind"] = (
+        "realtime" if _is_qwen_audio_realtime_model(item["target_model"]) else "tts"
+    )
 
     if prefix:
         item["prefix_encoded"] = prefix
@@ -741,6 +778,102 @@ def _enrich_qwen_audio_voice(v: dict) -> dict:
         except ValueError:
             item["display_name"] = prefix
     return item
+
+
+async def _run_qwen_audio_realtime_preview(
+    text: str, voice: str, model: str
+) -> tuple[bytes, float | None]:
+    """通过 Realtime WebSocket（文本注入 + response.create）合成试听 WAV。"""
+    import websockets
+
+    preview_text = (text or "").strip()
+    if not preview_text:
+        raise ValueError("文本内容为空")
+
+    url = _qwen_audio_realtime_ws_url(model)
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    workspace_id = os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip()
+    if workspace_id:
+        headers["X-DashScope-WorkSpace"] = workspace_id
+
+    chunks: list[bytes] = []
+    error: str | None = None
+    t0 = time.perf_counter()
+    first_audio_at: float | None = None
+
+    async with websockets.connect(url, additional_headers=headers) as ws:
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "session.update",
+                    "session": {
+                        "modalities": ["text", "audio"],
+                        "voice": voice,
+                        "turn_detection": None,
+                        "instructions": _QWEN_AUDIO_REALTIME_PREVIEW_INSTRUCTIONS,
+                    },
+                }
+            )
+        )
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": f"请朗读：\n{preview_text}",
+                            }
+                        ],
+                    },
+                }
+            )
+        )
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "response.create",
+                    "response": {"modalities": ["audio", "text"]},
+                }
+            )
+        )
+
+        try:
+            async with asyncio.timeout(120):
+                async for msg in ws:
+                    event = json.loads(msg)
+                    event_type = event.get("type", "")
+                    if event_type == "response.audio.delta":
+                        if first_audio_at is None:
+                            first_audio_at = time.perf_counter()
+                        chunks.append(base64.b64decode(event["delta"]))
+                    elif event_type == "response.done":
+                        break
+                    elif event_type == "error":
+                        err = event.get("error") or {}
+                        error = (
+                            err.get("message")
+                            or err.get("code")
+                            or str(event)
+                        )
+                        break
+        except TimeoutError as e:
+            raise TimeoutError("Qwen-Audio Realtime 试听超时") from e
+
+    if error:
+        raise RuntimeError(f"Realtime 错误: {error}")
+    if not chunks:
+        raise RuntimeError("Realtime 未返回音频数据")
+
+    first_delay_ms = None
+    if first_audio_at is not None:
+        first_delay_ms = round((first_audio_at - t0) * 1000, 1)
+        print(f"[qwen-audio/realtime] first_delay_ms: {first_delay_ms}")
+
+    return _pcm_to_wav(b"".join(chunks), _QWEN_AUDIO_REALTIME_SAMPLE_RATE), first_delay_ms
 
 
 @app.get("/qwen-audio", dependencies=[Depends(_verify_basic)])
@@ -864,18 +997,23 @@ class QwenAudioTTSRequest(BaseModel):
 @app.post("/api/qwen-audio/tts")
 async def qwen_audio_tts(req: QwenAudioTTSRequest):
     try:
-        loop = asyncio.get_event_loop()
-        wav_data, first_delay_ms = await loop.run_in_executor(
-            None,
-            _run_qwen_audio_tts,
-            req.text,
-            req.voice,
-            req.model,
-            req.sample_rate,
-            req.mode,
-            req.speech_rate,
-            req.pitch_rate,
-        )
+        if _is_qwen_audio_realtime_model(req.model):
+            wav_data, first_delay_ms = await _run_qwen_audio_realtime_preview(
+                req.text, req.voice, req.model
+            )
+        else:
+            loop = asyncio.get_event_loop()
+            wav_data, first_delay_ms = await loop.run_in_executor(
+                None,
+                _run_qwen_audio_tts,
+                req.text,
+                req.voice,
+                req.model,
+                req.sample_rate,
+                req.mode,
+                req.speech_rate,
+                req.pitch_rate,
+            )
     except TimeoutError as e:
         logger.exception(
             "Qwen-Audio TTS 超时: model=%s voice=%s sample_rate=%s mode=%s",

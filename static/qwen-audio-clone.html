@@ -275,19 +275,88 @@
       justify-content: space-between;
       padding: 10px 12px;
       border: 1.5px solid #e2e8f0;
+      border-left-width: 4px;
       border-radius: 8px;
-      transition: border-color .2s, box-shadow .2s;
+      transition: border-color .2s, box-shadow .2s, background .2s;
       background: #fafafa;
     }
 
-    .voice-item:hover {
-      border-color: #a5f3fc;
-      box-shadow: 0 1px 4px rgba(8, 145, 178, .1);
+    .voice-item.kind-tts {
+      border-left-color: #059669;
+      background: #f0fdf9;
     }
 
-    .voice-item.playing {
+    .voice-item.kind-realtime {
+      border-left-color: #d97706;
+      background: #fffbeb;
+    }
+
+    .voice-item.kind-tts:hover {
+      border-color: #6ee7b7;
+      border-left-color: #059669;
+      box-shadow: 0 1px 4px rgba(5, 150, 105, .12);
+    }
+
+    .voice-item.kind-realtime:hover {
+      border-color: #fcd34d;
+      border-left-color: #d97706;
+      box-shadow: 0 1px 4px rgba(217, 119, 6, .12);
+    }
+
+    .voice-item.playing.kind-tts {
       border-color: #059669;
-      background: #ecfeff;
+      background: #ecfdf5;
+    }
+
+    .voice-item.playing.kind-realtime {
+      border-color: #d97706;
+      background: #fef3c7;
+    }
+
+    .voice-kind-legend {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .voice-kind-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: #64748b;
+    }
+
+    .voice-kind-dot::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .voice-kind-dot.tts::before { background: #059669; }
+    .voice-kind-dot.realtime::before { background: #d97706; }
+
+    .kind-badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-top: 3px;
+      margin-right: 4px;
+    }
+
+    .kind-badge-tts {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .kind-badge-realtime {
+      background: #fef3c7;
+      color: #92400e;
     }
 
     .voice-info {
@@ -317,11 +386,13 @@
 
     .voice-model {
       font-size: 11px;
-      color: #67e8f9;
       display: block;
       margin-top: 1px;
       font-family: monospace;
     }
+
+    .voice-model.kind-tts { color: #059669; }
+    .voice-model.kind-realtime { color: #d97706; }
 
     .status-badge {
       display: inline-block;
@@ -870,14 +941,18 @@
 
         <div class="voice-list-header">
           <span>音色列表</span>
-          <button class="btn btn-ghost btn-sm" onclick="loadVoices()" id="btn-refresh">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="23 4 23 10 17 10" />
-              <polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-            刷新
-          </button>
+          <div class="voice-kind-legend">
+            <span class="voice-kind-dot tts">TTS</span>
+            <span class="voice-kind-dot realtime">Realtime</span>
+            <button class="btn btn-ghost btn-sm" onclick="loadVoices()" id="btn-refresh">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="23 4 23 10 17 10" />
+                <polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+              刷新
+            </button>
+          </div>
         </div>
 
         <div id="voice-list">
@@ -946,10 +1021,12 @@
         </div>
 
         <div class="form-group">
-          <label>TTS 模型</label>
+          <label>目标模型</label>
           <select id="tts-model-select">
-            <option value="qwen-audio-3.0-tts-flash" selected>qwen-audio-3.0-tts-flash</option>
+            <option value="qwen-audio-3.0-tts-flash" selected>qwen-audio-3.0-tts-flash（TTS）</option>
+            <option value="qwen-audio-3.0-realtime-flash">qwen-audio-3.0-realtime-flash（Realtime）</option>
           </select>
+          <div class="form-hint">TTS 音色绿色标识；Realtime 音色橙色标识，试听走实时对话协议</div>
         </div>
 
         <button class="btn btn-primary btn-lg" id="btn-create" onclick="createVoice()" disabled>
@@ -1030,25 +1107,29 @@
       list.innerHTML = voices.map(v => {
         const displayName = v.display_name || v.voice_id;
         const model = v.target_model || 'qwen-audio-3.0-tts-flash';
+        const kind = voiceKind(model, v.kind);
         const status = v.status || 'OK';
         const safeId = escHtml(v.voice_id);
         const safeModel = escHtml(model);
         const statusClass = status === 'OK' ? 'status-ok' : status === 'DEPLOYING' ? 'status-deploying' : 'status-undeployed';
         const statusLabel = status === 'OK' ? '可用' : status === 'DEPLOYING' ? '审核中' : '审核未通过';
+        const kindLabel = kind === 'realtime' ? 'Realtime' : 'TTS';
         const canPlay = status === 'OK';
         const hasCache = !!ttsAudioCache[v.voice_id];
+        const playLabel = kind === 'realtime' ? '▶ 试听' : '▶ 播放';
         return `
-    <div class="voice-item" id="voice-${safeId}">
+    <div class="voice-item kind-${kind}" id="voice-${safeId}">
       <div class="voice-info">
         <span class="voice-name">${escHtml(displayName)}</span>
         <span class="voice-id">${safeId}</span>
-        <span class="voice-model">${safeModel}</span>
+        <span class="voice-model kind-${kind}">${safeModel}</span>
+        <span class="kind-badge kind-badge-${kind}">${kindLabel}</span>
         <span class="status-badge ${statusClass}">${statusLabel}</span>
       </div>
       <div class="voice-actions">
         ${canPlay ? `<button class="btn btn-success btn-sm" id="play-btn-${safeId}"
           onclick="toggleVoicePlay('${safeId}', '${safeModel}')">
-          ▶ 播放
+          ${playLabel}
         </button>
         ${hasCache ? `
         <button class="btn btn-ghost btn-sm" id="replay-btn-${safeId}"
@@ -1062,6 +1143,11 @@
       </div>
     </div>`;
       }).join('');
+    }
+
+    function voiceKind(model, kindHint) {
+      if (kindHint === 'realtime' || kindHint === 'tts') return kindHint;
+      return (model || '').includes('realtime') ? 'realtime' : 'tts';
     }
 
     function escHtml(s) {
@@ -1138,6 +1224,12 @@
       });
     }
 
+    function playButtonLabel(voiceId) {
+      const v = voices.find(x => x.voice_id === voiceId);
+      const kind = voiceKind(v?.target_model, v?.kind);
+      return kind === 'realtime' ? '▶ 试听' : '▶ 播放';
+    }
+
     async function replayVoiceAudio(voiceId) {
       if (isPlayingTTS) {
         stopTTS();
@@ -1164,7 +1256,7 @@
       } finally {
         isPlayingTTS = false;
         currentPlayingVoiceId = null;
-        if (btn) btn.textContent = '▶ 播放';
+        if (btn) btn.textContent = playButtonLabel(voiceId);
         if (item) item.classList.remove('playing');
       }
     }
@@ -1197,6 +1289,7 @@
         return;
       }
 
+      const kind = voiceKind(targetModel);
       const mode = document.querySelector('input[name="play-mode"]:checked').value;
       const sampleRate = parseInt(document.getElementById('sample-rate').value);
       const speechRate = parseFloat(document.getElementById('speech-rate').value);
@@ -1215,11 +1308,14 @@
       try {
         await playTTSRequest(text, voiceId, targetModel, sampleRate, mode, speechRate, pitchRate, ttsAbortController.signal);
       } catch (e) {
-        if (e.name !== 'AbortError') toast(`TTS 播放失败: ${e.message}`, 'error');
+        if (e.name !== 'AbortError') {
+          const label = kind === 'realtime' ? 'Realtime 试听' : 'TTS 播放';
+          toast(`${label}失败: ${e.message}`, 'error');
+        }
       } finally {
         isPlayingTTS = false;
         currentPlayingVoiceId = null;
-        if (btn) btn.textContent = '▶ 播放';
+        if (btn) btn.textContent = playButtonLabel(voiceId);
         if (item) item.classList.remove('playing');
         document.getElementById('tts-status').style.display = 'none';
       }
@@ -1236,7 +1332,7 @@
       if (voiceId) {
         const btn = document.getElementById(`play-btn-${voiceId}`);
         const item = document.getElementById(`voice-${voiceId}`);
-        if (btn) btn.textContent = '▶ 播放';
+        if (btn) btn.textContent = playButtonLabel(voiceId);
         if (item) item.classList.remove('playing');
       }
       document.getElementById('tts-status').style.display = 'none';
