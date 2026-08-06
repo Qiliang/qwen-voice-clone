@@ -780,15 +780,32 @@ def _enrich_qwen_audio_voice(v: dict) -> dict:
     return item
 
 
+def _resample_pcm16(pcm: bytes, src_rate: int, dst_rate: int) -> bytes:
+    """将 int16 mono PCM 从 src_rate 重采样到 dst_rate。"""
+    if src_rate == dst_rate or not pcm:
+        return pcm
+    src_np = np.frombuffer(pcm, dtype=np.int16)
+    if len(src_np) == 0:
+        return b""
+    src_audio = src_np.astype(np.float32) / 32768.0
+    resampled = soxr.resample(src_audio, src_rate, dst_rate)
+    return np.clip(resampled * 32768.0, -32768, 32767).astype(np.int16).tobytes()
+
+
 async def _run_qwen_audio_realtime_preview(
-    text: str, voice: str, model: str
+    text: str, voice: str, model: str, sample_rate: int = 8000
 ) -> tuple[bytes, float | None]:
-    """通过 Realtime WebSocket（文本注入 + response.create）合成试听 WAV。"""
+    """通过 Realtime WebSocket（文本注入 + response.create）合成试听 WAV。
+
+    Realtime 固定输出 24kHz PCM，再按界面采样率重采样。
+    """
     import websockets
 
     preview_text = (text or "").strip()
     if not preview_text:
         raise ValueError("文本内容为空")
+    if sample_rate not in (8000, 16000, 24000):
+        sample_rate = 8000
 
     url = _qwen_audio_realtime_ws_url(model)
     headers = {"Authorization": f"Bearer {API_KEY}"}
@@ -871,9 +888,15 @@ async def _run_qwen_audio_realtime_preview(
     first_delay_ms = None
     if first_audio_at is not None:
         first_delay_ms = round((first_audio_at - t0) * 1000, 1)
-        print(f"[qwen-audio/realtime] first_delay_ms: {first_delay_ms}")
+        print(
+            f"[qwen-audio/realtime] first_delay_ms: {first_delay_ms} "
+            f"sample_rate: {sample_rate}"
+        )
 
-    return _pcm_to_wav(b"".join(chunks), _QWEN_AUDIO_REALTIME_SAMPLE_RATE), first_delay_ms
+    pcm = _resample_pcm16(
+        b"".join(chunks), _QWEN_AUDIO_REALTIME_SAMPLE_RATE, sample_rate
+    )
+    return _pcm_to_wav(pcm, sample_rate), first_delay_ms
 
 
 @app.get("/qwen-audio", dependencies=[Depends(_verify_basic)])
@@ -999,7 +1022,7 @@ async def qwen_audio_tts(req: QwenAudioTTSRequest):
     try:
         if _is_qwen_audio_realtime_model(req.model):
             wav_data, first_delay_ms = await _run_qwen_audio_realtime_preview(
-                req.text, req.voice, req.model
+                req.text, req.voice, req.model, req.sample_rate
             )
         else:
             loop = asyncio.get_event_loop()
